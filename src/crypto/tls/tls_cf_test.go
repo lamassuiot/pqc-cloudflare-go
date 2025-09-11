@@ -4,7 +4,7 @@ import (
 	"crypto/rand"
 	"testing"
 
-	"github.com/cloudflare/circl/hpke"
+	"cloudflare/circl/hpke"
 )
 
 // If the client uses the wrong KEM algorithm to offer ECH, the ECH provider

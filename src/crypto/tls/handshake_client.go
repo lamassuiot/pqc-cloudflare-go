@@ -23,7 +23,7 @@ import (
 	"strings"
 	"time"
 
-	circlSign "github.com/cloudflare/circl/sign"
+	circlSign "cloudflare/circl/sign"
 )
 
 type clientHandshakeState struct {

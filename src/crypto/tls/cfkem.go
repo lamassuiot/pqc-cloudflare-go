@@ -22,9 +22,9 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/cloudflare/circl/hpke"
-	"github.com/cloudflare/circl/kem"
-	"github.com/cloudflare/circl/kem/hybrid"
+	"cloudflare/circl/hpke"
+	"cloudflare/circl/kem"
+	"cloudflare/circl/kem/hybrid"
 )
 
 // Either *ecdh.PrivateKey or *kemPrivateKey

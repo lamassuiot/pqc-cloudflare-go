@@ -12,8 +12,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cloudflare/circl/sign"
-	"github.com/cloudflare/circl/sign/eddilithium2"
+	"cloudflare/circl/sign"
+	"cloudflare/circl/sign/eddilithium2"
 )
 
 func TestPQSignatureSchemes(t *testing.T) {

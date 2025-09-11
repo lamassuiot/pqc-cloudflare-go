@@ -22,7 +22,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/cloudflare/circl/hpke"
+	"cloudflare/circl/hpke"
 )
 
 // A Conn represents a secured connection.

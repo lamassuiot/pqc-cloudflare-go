@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/cloudflare/circl/hpke"
+	"cloudflare/circl/hpke"
 
 	"golang.org/x/crypto/cryptobyte"
 )

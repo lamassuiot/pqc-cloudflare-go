@@ -28,7 +28,7 @@ import (
 	"path/filepath"
 	"time"
 
-	circlSign "github.com/cloudflare/circl/sign"
+	circlSign "cloudflare/circl/sign"
 )
 
 var (

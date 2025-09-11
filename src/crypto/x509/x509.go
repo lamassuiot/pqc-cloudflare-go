@@ -49,8 +49,8 @@ import (
 	_ "crypto/sha256"
 	_ "crypto/sha512"
 
-	circlPki "github.com/cloudflare/circl/pki"
-	circlSign "github.com/cloudflare/circl/sign"
+	circlPki "cloudflare/circl/pki"
+	circlSign "cloudflare/circl/sign"
 
 	"golang.org/x/crypto/cryptobyte"
 	cryptobyte_asn1 "golang.org/x/crypto/cryptobyte/asn1"
@@ -243,6 +243,9 @@ const (
 	PureEd25519
 	PureEdDilithium2
 	PureEdDilithium3
+	PureMLDSA44
+	PureMLDSA65
+	PureMLDSA87
 )
 
 func (algo SignatureAlgorithm) isRSAPSS() bool {
@@ -273,6 +276,9 @@ const (
 	Ed25519
 	EdDilithium2
 	EdDilithium3
+	MLDSA44
+	MLDSA65
+	MLDSA87
 )
 
 var publicKeyAlgoName = [...]string{
@@ -282,6 +288,9 @@ var publicKeyAlgoName = [...]string{
 	Ed25519:      "Ed25519",
 	EdDilithium2: "Ed25519-Dilithium2",
 	EdDilithium3: "Ed448-Dilithium3",
+	MLDSA44:      "ML-DSA-44",
+	MLDSA65:      "ML-DSA-65",
+	MLDSA87:      "ML-DSA-87",
 }
 
 func (algo PublicKeyAlgorithm) String() string {
@@ -367,6 +376,11 @@ var (
 	// but it's specified by ISO. Microsoft's makecert.exe has been known
 	// to produce certificates with this OID.
 	oidISOSignatureSHA1WithRSA = asn1.ObjectIdentifier{1, 3, 14, 3, 2, 29}
+
+	// ML-DSA OIDs
+	oidSignatureMLDSA44 = asn1.ObjectIdentifier{2, 16, 840, 1, 101, 3, 4, 3, 17}
+	oidSignatureMLDSA65 = asn1.ObjectIdentifier{2, 16, 840, 1, 101, 3, 4, 3, 18}
+	oidSignatureMLDSA87 = asn1.ObjectIdentifier{2, 16, 840, 1, 101, 3, 4, 3, 19}
 )
 
 var signatureAlgorithmDetails = []struct {
@@ -393,6 +407,9 @@ var signatureAlgorithmDetails = []struct {
 	{ECDSAWithSHA384, "ECDSA-SHA384", oidSignatureECDSAWithSHA384, ECDSA, crypto.SHA384},
 	{ECDSAWithSHA512, "ECDSA-SHA512", oidSignatureECDSAWithSHA512, ECDSA, crypto.SHA512},
 	{PureEd25519, "Ed25519", oidSignatureEd25519, Ed25519, crypto.Hash(0) /* no pre-hashing */},
+	{PureMLDSA44, "ML-DSA-44", oidSignatureMLDSA44, MLDSA44, crypto.Hash(0) /* no pre-hashing */},
+	{PureMLDSA65, "ML-DSA-65", oidSignatureMLDSA65, MLDSA65, crypto.Hash(0) /* no pre-hashing */},
+	{PureMLDSA87, "ML-DSA-87", oidSignatureMLDSA87, MLDSA87, crypto.Hash(0) /* no pre-hashing */},
 }
 
 // hashToPSSParameters contains the DER encoded RSA PSS parameters for the

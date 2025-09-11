@@ -741,7 +741,7 @@ func TestDependencies(t *testing.T) {
 	for _, pkg := range all {
 		// Skip import dependency checking within the CIRCL library,
 		// there are too many packages.
-		if strings.HasPrefix(pkg, "github.com/cloudflare/circl/") {
+		if strings.HasPrefix(pkg, "cloudflare/circl/") {
 			continue
 		}
 		imports, err := findImports(pkg)
@@ -754,9 +754,9 @@ func TestDependencies(t *testing.T) {
 		}
 		var bad []string
 		for _, imp := range imports {
-			// TODO Remove this exception for github.com/cloudflare/circl
+			// TODO Remove this exception for cloudflare/circl
 			// and add CIRCL to the dependency graph specified by `depsRules`.
-			if strings.HasPrefix(imp, "github.com/cloudflare/circl/") {
+			if strings.HasPrefix(imp, "cloudflare/circl/") {
 				continue
 			}
 			sawImport[pkg][imp] = true

@@ -4,10 +4,10 @@
 package tls
 
 import (
-	circlPki "github.com/cloudflare/circl/pki"
-	circlSign "github.com/cloudflare/circl/sign"
-	"github.com/cloudflare/circl/sign/eddilithium2"
-	"github.com/cloudflare/circl/sign/eddilithium3"
+	circlPki "cloudflare/circl/pki"
+	circlSign "cloudflare/circl/sign"
+	"cloudflare/circl/sign/eddilithium2"
+	"cloudflare/circl/sign/eddilithium3"
 )
 
 // To add a signature scheme from Circl

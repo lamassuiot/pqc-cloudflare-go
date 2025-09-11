@@ -4,10 +4,13 @@ import (
 	"crypto"
 	"encoding/asn1"
 
-	circlPki "github.com/cloudflare/circl/pki"
-	circlSign "github.com/cloudflare/circl/sign"
-	"github.com/cloudflare/circl/sign/eddilithium3"
-	"github.com/cloudflare/circl/sign/eddilithium2"
+	circlPki "cloudflare/circl/pki"
+	circlSign "cloudflare/circl/sign"
+	"cloudflare/circl/sign/eddilithium2"
+	"cloudflare/circl/sign/eddilithium3"
+	"cloudflare/circl/sign/mldsa/mldsa44"
+	"cloudflare/circl/sign/mldsa/mldsa65"
+	"cloudflare/circl/sign/mldsa/mldsa87"
 )
 
 // To add a signature scheme from Circl
@@ -24,6 +27,9 @@ var circlSchemes = [...]struct {
 }{
 	{PureEdDilithium2, EdDilithium2, eddilithium2.Scheme()},
 	{PureEdDilithium3, EdDilithium3, eddilithium3.Scheme()},
+	{PureMLDSA44, MLDSA44, mldsa44.Scheme()},
+	{PureMLDSA65, MLDSA65, mldsa65.Scheme()},
+	{PureMLDSA87, MLDSA87, mldsa87.Scheme()},
 }
 
 func CirclSchemeByPublicKeyAlgorithm(alg PublicKeyAlgorithm) circlSign.Scheme {

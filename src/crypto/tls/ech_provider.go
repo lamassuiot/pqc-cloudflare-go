@@ -7,8 +7,8 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/cloudflare/circl/hpke"
-	"github.com/cloudflare/circl/kem"
+	"cloudflare/circl/hpke"
+	"cloudflare/circl/kem"
 
 	"golang.org/x/crypto/cryptobyte"
 )

@@ -67,7 +67,7 @@ import (
 	"os"
 	"strings"
 
-	circlSign "github.com/cloudflare/circl/sign"
+	circlSign "cloudflare/circl/sign"
 )
 
 // Server returns a new TLS server side connection

@@ -8,7 +8,7 @@ import (
 	"crypto"
 	"testing"
 
-	circlPki "github.com/cloudflare/circl/pki"
+	circlPki "cloudflare/circl/pki"
 )
 
 func TestSignatureSelection(t *testing.T) {

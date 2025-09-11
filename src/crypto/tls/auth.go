@@ -16,8 +16,8 @@ import (
 	"hash"
 	"io"
 
-	circlPki "github.com/cloudflare/circl/pki"
-	circlSign "github.com/cloudflare/circl/sign"
+	circlPki "cloudflare/circl/pki"
+	circlSign "cloudflare/circl/sign"
 )
 
 // verifyHandshakeSignature verifies a signature against pre-hashed

@@ -26,8 +26,8 @@ import (
 	"strings"
 	"time"
 
-	circlSign "github.com/cloudflare/circl/sign"
-	circlSchemes "github.com/cloudflare/circl/sign/schemes"
+	circlSign "cloudflare/circl/sign"
+	circlSchemes "cloudflare/circl/sign/schemes"
 )
 
 var (
