@@ -125,7 +125,6 @@ func CreateChameleonCertificate(randSource io.Reader, template, deltaParent, bas
 	return CreateCertificate(randSource, template, baseParent, basePubKey, basePrivKey)
 }
 
-// TODO -> Add error handling to internal function calls
 func ReconstructDeltaCertificate(base *Certificate) (*Certificate, error) {
 	// Build a map with all base certificate extensions and their index
 	baseExtensions := make(map[string]int)
@@ -149,7 +148,10 @@ func ReconstructDeltaCertificate(base *Certificate) (*Certificate, error) {
 	// 1. Clone the base certificate and remove the DCD extension
 	// In order to do this, the base certificate is encoded and decoded to create
 	// a new object.
-	deltaCert, _ := ParseCertificate(base.Raw)
+	deltaCert, err := ParseCertificate(base.Raw)
+	if err != nil {
+		return nil, err
+	}
 	deltaCert.Extensions = append(deltaCert.Extensions[:dcdIndex], deltaCert.Extensions[dcdIndex+1:]...)
 
 	// 2. Replace the Serial Number
@@ -162,20 +164,31 @@ func ReconstructDeltaCertificate(base *Certificate) (*Certificate, error) {
 	// 4. Replace the Issuer field (if required)
 	if len(dcd.Issuer.Bytes) > 0 {
 		deltaCert.RawIssuer = dcd.Subject.Bytes
-		issuerRDNs, _ := parseName(dcd.Issuer.Bytes)
+		issuerRDNs, err := parseName(dcd.Issuer.Bytes)
 		deltaCert.Issuer.FillFromRDNSequence(issuerRDNs)
+
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	// 6. Replace the Subject Public Key information
 	deltaCert.RawSubjectPublicKeyInfo = dcd.PublicKey.Raw
 	deltaCert.PublicKeyAlgorithm = getPublicKeyAlgorithmFromOID(dcd.PublicKey.Algorithm.Algorithm)
-	deltaCert.PublicKey, _ = parsePublicKey(&dcd.PublicKey)
+	deltaCert.PublicKey, err = parsePublicKey(&dcd.PublicKey)
+	if err != nil {
+		return nil, err
+	}
 
 	// 7. Replace the subject field (if required)
 	if len(dcd.Subject.Bytes) > 0 {
 		deltaCert.RawSubject = dcd.Subject.Bytes
-		subjectRDNs, _ := parseName(dcd.Subject.Bytes)
+		subjectRDNs, err := parseName(dcd.Subject.Bytes)
 		deltaCert.Subject.FillFromRDNSequence(subjectRDNs)
+
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	// 8. Parse extensions and see if any modifications are required
