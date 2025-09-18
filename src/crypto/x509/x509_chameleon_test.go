@@ -3,9 +3,9 @@ package x509
 import (
 	"bytes"
 	"cloudflare/circl/sign/mldsa/mldsa65"
-	"crypto/x509/pkix"
 	"crypto/rand"
 	"crypto/rsa"
+	"crypto/x509/pkix"
 	"encoding/pem"
 	"testing"
 )

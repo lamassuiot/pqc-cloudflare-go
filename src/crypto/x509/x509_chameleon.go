@@ -17,7 +17,7 @@ type deltaCertificateDescriptor struct {
 	Validity           validity                 `asn1:"optional,explicit,tag:2"`
 	Subject            asn1.RawValue            `asn1:"optional,explicit,tag:3"`
 	PublicKey          publicKeyInfo
-	Extensions         []pkix.Extension 	    `asn1:"omitempty,optional,explicit,tag:4"`
+	Extensions         []pkix.Extension `asn1:"omitempty,optional,explicit,tag:4"`
 	SignatureValue     asn1.BitString
 }
 
@@ -34,7 +34,8 @@ func parseDeltaExtension(deltaDer []byte) (*deltaCertificateDescriptor, error) {
 }
 
 // TODO -> Revise and modify value if the Draft is approved and IANA assigns an OID for
-//		   the extension.
+//
+//	the extension.
 var deltaExtensionOid = asn1.ObjectIdentifier{2, 16, 840, 1, 114027, 80, 6, 1}
 
 // CreateChameleonCertificate creates a new x509 chameleon certificate as per
@@ -72,44 +73,44 @@ func CreateChameleonCertificate(randSource io.Reader, template, deltaParent, bas
 	deltaExt := deltaCertificateDescriptor{
 		SerialNumber:       deltaCert.SerialNumber,
 		SignatureAlgorithm: signatureAlgorithm,
-		Issuer:             asn1.RawValue{
-			Class: 2,
-			Tag: 1,
+		Issuer: asn1.RawValue{
+			Class:      2,
+			Tag:        1,
 			IsCompound: true,
-			Bytes: deltaCert.RawIssuer,
+			Bytes:      deltaCert.RawIssuer,
 		},
 		Validity: validity{
 			NotBefore: deltaCert.NotBefore,
-			NotAfter: deltaCert.NotAfter,
+			NotAfter:  deltaCert.NotAfter,
 		},
 		Subject: asn1.RawValue{
-			Class: 2,
-			Tag: 3,
+			Class:      2,
+			Tag:        3,
 			IsCompound: true,
-			Bytes: deltaCert.RawSubject,
+			Bytes:      deltaCert.RawSubject,
 		},
-		PublicKey:          publicKeyInfo{
-			Raw: nil,
+		PublicKey: publicKeyInfo{
+			Raw:       nil,
 			Algorithm: pubKeyAlgorithm,
 			PublicKey: asn1.BitString{
-				Bytes: pubKeyBytes,
+				Bytes:     pubKeyBytes,
 				BitLength: len(pubKeyBytes) * 8,
 			},
 		},
-		Extensions:         deltaCert.Extensions,
-		SignatureValue:     asn1.BitString{
-			Bytes: deltaCert.Signature,
+		Extensions: deltaCert.Extensions,
+		SignatureValue: asn1.BitString{
+			Bytes:     deltaCert.Signature,
 			BitLength: len(deltaCert.Signature) * 8,
 		},
 	}
 	rawDeltaExt, err := asn1.MarshalWithParams(deltaExt, `asn1:"optional"`)
 
 	if err != nil {
-		return nil, err	
+		return nil, err
 	}
 	template.ExtraExtensions = []pkix.Extension{
 		{
-			Id: deltaExtensionOid,
+			Id:    deltaExtensionOid,
 			Value: rawDeltaExt,
 		},
 	}
@@ -249,10 +250,10 @@ func (c *Certificate) deriveRawCertificate() error {
 
 	// Rebuild the Certificate struct and encode it
 	signed := certificate{
-		TBSCertificate: certTBSCertificate,
+		TBSCertificate:     certTBSCertificate,
 		SignatureAlgorithm: signatureAlgorithm,
-		SignatureValue:     asn1.BitString{
-			Bytes: c.Signature,
+		SignatureValue: asn1.BitString{
+			Bytes:     c.Signature,
 			BitLength: len(c.Signature) * 8,
 		},
 	}
