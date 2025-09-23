@@ -276,9 +276,7 @@ const (
 	Ed25519
 	EdDilithium2
 	EdDilithium3
-	MLDSA44
-	MLDSA65
-	MLDSA87
+	MLDSA
 )
 
 var publicKeyAlgoName = [...]string{
@@ -288,9 +286,7 @@ var publicKeyAlgoName = [...]string{
 	Ed25519:      "Ed25519",
 	EdDilithium2: "Ed25519-Dilithium2",
 	EdDilithium3: "Ed448-Dilithium3",
-	MLDSA44:      "ML-DSA-44",
-	MLDSA65:      "ML-DSA-65",
-	MLDSA87:      "ML-DSA-87",
+	MLDSA:      "ML-DSA",
 }
 
 func (algo PublicKeyAlgorithm) String() string {
@@ -407,9 +403,9 @@ var signatureAlgorithmDetails = []struct {
 	{ECDSAWithSHA384, "ECDSA-SHA384", oidSignatureECDSAWithSHA384, ECDSA, crypto.SHA384},
 	{ECDSAWithSHA512, "ECDSA-SHA512", oidSignatureECDSAWithSHA512, ECDSA, crypto.SHA512},
 	{PureEd25519, "Ed25519", oidSignatureEd25519, Ed25519, crypto.Hash(0) /* no pre-hashing */},
-	{PureMLDSA44, "ML-DSA-44", oidSignatureMLDSA44, MLDSA44, crypto.Hash(0) /* no pre-hashing */},
-	{PureMLDSA65, "ML-DSA-65", oidSignatureMLDSA65, MLDSA65, crypto.Hash(0) /* no pre-hashing */},
-	{PureMLDSA87, "ML-DSA-87", oidSignatureMLDSA87, MLDSA87, crypto.Hash(0) /* no pre-hashing */},
+	{PureMLDSA44, "ML-DSA-44", oidSignatureMLDSA44, MLDSA, crypto.Hash(0) /* no pre-hashing */},
+	{PureMLDSA65, "ML-DSA-65", oidSignatureMLDSA65, MLDSA, crypto.Hash(0) /* no pre-hashing */},
+	{PureMLDSA87, "ML-DSA-87", oidSignatureMLDSA87, MLDSA, crypto.Hash(0) /* no pre-hashing */},
 }
 
 // hashToPSSParameters contains the DER encoded RSA PSS parameters for the
