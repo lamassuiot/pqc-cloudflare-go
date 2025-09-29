@@ -10,6 +10,15 @@ import (
 	"math/big"
 )
 
+// Current proposed OID for the delta extension in a "Chameleon" certificate, as defined
+// in the version 6 of the draft (draft-bonnell-lamps-chameleon-certs-06)
+// TODO -> Revise and modify value if the Draft is approved and IANA assigns an OID for
+//	the extension.
+var deltaExtensionOid = asn1.ObjectIdentifier{2, 16, 840, 1, 114027, 80, 6, 1}
+
+// OID for the RelatedCertificate Extension as per RFC-9763
+var relatedCertificateExtensionOid = asn1.ObjectIdentifier{1, 3, 6, 1, 5, 5, 7, 1}
+
 type deltaCertificateDescriptor struct {
 	SerialNumber       *big.Int
 	SignatureAlgorithm pkix.AlgorithmIdentifier `asn1:"optional,explicit,tag:0"`
@@ -21,22 +30,10 @@ type deltaCertificateDescriptor struct {
 	SignatureValue     asn1.BitString
 }
 
-func parseDeltaExtension(deltaDer []byte) (*deltaCertificateDescriptor, error) {
-	// Attempt to parse the delta extension
-	deltaExtension := deltaCertificateDescriptor{}
-	_, err := asn1.Unmarshal(deltaDer, &deltaExtension)
-	if err != nil {
-		return nil, err
-	}
-
-	// Return the result
-	return &deltaExtension, nil
+type relatedCertificateExtension struct {
+	HashAlgorithm pkix.AlgorithmIdentifier
+	HashValue     []byte
 }
-
-// TODO -> Revise and modify value if the Draft is approved and IANA assigns an OID for
-//
-//	the extension.
-var deltaExtensionOid = asn1.ObjectIdentifier{2, 16, 840, 1, 114027, 80, 6, 1}
 
 // CreateChameleonCertificate creates a new x509 chameleon certificate as per
 // `draft-bonnell-lamps-chameleon-certs-06`.
@@ -216,6 +213,52 @@ func ReconstructDeltaCertificate(base *Certificate) (*Certificate, error) {
 
 	// Return the reconstructed certificate
 	return deltaCert, nil
+}
+
+func CreateBoundCertificate(randSource io.Reader, template, parent *Certificate, relatedCertDer []byte, pubKey, privKey any) ([]byte, error) {
+	// Parse the related certificate
+	relatedCert, err := ParseCertificate(relatedCertDer)
+	if err != nil {
+		return nil, err
+	}
+
+	// Get the AlgorithmIdentifier for the Related Certificate's signature algorithm
+	_, signatureAlgorithm, err := signingParamsForPublicKey(relatedCert.PublicKey, relatedCert.SignatureAlgorithm)
+	if err != nil {
+		return nil, err
+	}
+
+	// Build and encode the related certificate extension
+	relatedCertExtension := relatedCertificateExtension{
+		HashAlgorithm: signatureAlgorithm,
+	}
+	rawRelatedCertExtension, err := asn1.Marshal(relatedCertExtension)
+	if err != nil {
+		return nil, err
+	}
+
+	// Add the extension to the template
+	template.ExtraExtensions = []pkix.Extension{
+		{
+			Id: relatedCertificateExtensionOid,
+			Value: rawRelatedCertExtension,
+		},
+	}
+
+	// Create the certificate
+	return CreateCertificate(randSource, template, parent, pubKey, privKey)
+}
+
+func parseDeltaExtension(deltaDer []byte) (*deltaCertificateDescriptor, error) {
+	// Attempt to parse the delta extension
+	deltaExtension := deltaCertificateDescriptor{}
+	_, err := asn1.Unmarshal(deltaDer, &deltaExtension)
+	if err != nil {
+		return nil, err
+	}
+
+	// Return the result
+	return &deltaExtension, nil
 }
 
 func (c *Certificate) deriveRawCertificate() error {
