@@ -3,17 +3,25 @@ package x509
 import (
 	"bytes"
 	"cloudflare/circl/sign/mldsa/mldsa65"
+	"crypto"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509/pkix"
 	"encoding/asn1"
 	"encoding/pem"
+	"errors"
 	"math/big"
 	"testing"
 )
 
 // In order to dump a PEM encoded certificate, use the following instruction:
 // pem.Encode(os.Stdout, &pem.Block{Type: "CERTIFICATE", Bytes: deltaCert.Raw})
+
+////////////////////////////////////////////////////////////////////////////////
+//                                                                            //
+// Test Cases                                                                //
+//                                                                            //
+////////////////////////////////////////////////////////////////////////////////
 
 func TestReconstructRootDeltaCertificate(t *testing.T) {
 	// Decode the base certificate
@@ -93,31 +101,8 @@ func TestReconstructRootDeltaCertificate(t *testing.T) {
 }
 
 func TestCreateChameleonRootCertificate(t *testing.T) {
-	// Generate a new template
-	template := Certificate{
-		Subject: pkix.Name{
-			Organization: []string{"Test Org"},
-		},
-		KeyUsage: KeyUsageCertSign | KeyUsageKeyEncipherment | KeyUsageDigitalSignature,
-		IsCA:     true,
-	}
-
-	// Generate the traditional and post quantum keys
-	tradPrivKey, err := rsa.GenerateKey(rand.Reader, 4096)
-	if err != nil {
-		t.Error("Could not generate the RSA key")
-	}
-	_, pqPrivKey, err := mldsa65.GenerateKey(rand.Reader)
-	if err != nil {
-		t.Error("Could not generate the RSA key")
-	}
-
-	// Generate the chameleon certificate
-	chameleonDer, err := CreateChameleonCertificate(rand.Reader, &template, &template, &template, &tradPrivKey.PublicKey, pqPrivKey.Public(), tradPrivKey, pqPrivKey)
-	if err != nil {
-		t.Error(err)
-	}
-	chameleonCert, err := ParseCertificate(chameleonDer)
+	// Generate the certificate
+	_, _, chameleonCert, err := createChameleonRoot()
 	if err != nil {
 		t.Error(err)
 	}
@@ -130,13 +115,13 @@ func TestCreateChameleonRootCertificate(t *testing.T) {
 		}
 	}
 	if !found {
-		t.Error("GenerateChameleonCert(): expected the chameleon certificate to have a Delta extension")
+		t.Error("Expected the chameleon certificate to have a Delta extension")
 	}
 
 	// Check that the chameleon certificate is valid
 	err = chameleonCert.CheckSignature(chameleonCert.SignatureAlgorithm, chameleonCert.RawTBSCertificate, chameleonCert.Signature)
 	if err != nil {
-		t.Error("GenerateChameleonCert(): Incorrect base signature")
+		t.Error("Incorrect base signature")
 	}
 
 	// Reconstruct the delta certificate
@@ -149,7 +134,104 @@ func TestCreateChameleonRootCertificate(t *testing.T) {
 	err = deltaCert.CheckSignature(deltaCert.SignatureAlgorithm, deltaCert.RawTBSCertificate, deltaCert.Signature)
 	if err != nil {
 		t.Error(err)
-		t.Error("GenerateChameleonCert(): Incorrect delta signature")
+		t.Error("Incorrect delta signature")
+	}
+}
+
+func TestCreateChameleonSubordinateCertificate(t *testing.T) {
+	// Generate a root chameleon certificate
+	deltaRootPrivKey, baseRootPrivKey, baseRootCert, err := createChameleonRoot()
+	if err != nil {
+		t.Error(err)
+	}
+
+	// Extract the delta certificate
+	deltaRootCert, err := ReconstructDeltaCertificate(baseRootCert)
+	if err != nil {
+		t.Error(err)
+	}
+
+	// Generate a root chameleon certificate
+	template := Certificate{
+		Subject: pkix.Name{
+			Organization: []string{"Test Org"},
+		},
+		KeyUsage: KeyUsageCertSign | KeyUsageKeyEncipherment | KeyUsageDigitalSignature,
+		IsCA:     true,
+	}
+
+	// Generate the traditional and post quantum keys
+	deltaPrivKey, err := rsa.GenerateKey(rand.Reader, 4096)
+	if err != nil {
+		t.Error("Could not generate the RSA key")
+	}
+	_, basePrivKey, err := mldsa65.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Error("Could not generate the RSA key")
+	}
+
+	// Create a subordinate certificate
+	chameleonDer, err := CreateChameleonCertificate(
+		rand.Reader, &template, &template, deltaRootCert, baseRootCert, &deltaPrivKey.PublicKey, basePrivKey.Public(), deltaRootPrivKey, baseRootPrivKey)
+	if err != nil {
+		t.Error(err)
+	}
+	chameleonCert, err := ParseCertificate(chameleonDer)
+	if err != nil {
+		t.Error(err)
+	}
+
+	// Check that the newly created chameleon certificate is valid
+	err = baseRootCert.CheckSignature(chameleonCert.SignatureAlgorithm, chameleonCert.RawTBSCertificate, chameleonCert.Signature)
+	if err != nil {
+		t.Error("Incorrect base signature")
+	}
+
+	// Reconstruct the delta certificate
+	deltaCert, err := ReconstructDeltaCertificate(chameleonCert)
+	if err != nil {
+		t.Error(err)
+	}
+
+	// Verify the delta signature
+	err = deltaRootCert.CheckSignature(deltaCert.SignatureAlgorithm, deltaCert.RawTBSCertificate, deltaCert.Signature)
+	if err != nil {
+		t.Error(err)
+		t.Error("Incorrect delta signature")
+	}
+}
+
+func TestDeltaCertificateExtensionContentWhenDeltaAndBaseParentTemplateIsTheSame(t *testing.T) {
+	// Create a chameleon root certificate
+	_, _, chameleonCert, err := createChameleonRoot()
+	if err != nil {
+		t.Error(err)
+	}
+
+	// Get the Raw Delta Extension
+	var deltaExtension pkix.Extension
+	for _, extension := range chameleonCert.Extensions {
+		if extension.Id.Equal(deltaExtensionOid) {
+			deltaExtension = extension
+		}
+	}
+
+	// Check that the delta extension only has the Serial Number, Signature Algorithm,
+	// Public Key Informtion and Signature Value fields.
+	dcd, err := parseDeltaExtension(deltaExtension.Value)
+	if err != nil {
+		t.Error("Invalid delta extension")
+	}
+
+	if dcd.Issuer.Bytes != nil || dcd.Validity != (validity{}) || dcd.Subject.Bytes != nil {
+		t.Error("DCD contains duplicate information")
+	}
+
+	// Check that it only contains the minimum
+	for _, ext := range dcd.Extensions {
+		if !ext.Id.Equal(oidExtensionSubjectKeyId) {
+			t.Error("DCD contains unnecessary extensions")
+		}
 	}
 }
 
@@ -222,6 +304,49 @@ func TestCreateBoundRootCertificate(t *testing.T) {
 		t.Errorf("Error: expected '%v' signature algorithm but got '%v'", relatedCert.SignatureAlgorithm, sigAlgo)
 	}
 }
+
+////////////////////////////////////////////////////////////////////////////////
+//                                                                            //
+// Helper functions                                                           //
+//                                                                            //
+////////////////////////////////////////////////////////////////////////////////
+
+func createChameleonRoot() (crypto.Signer, crypto.Signer, *Certificate, error) {
+	// Generate a root chameleon certificate
+	template := Certificate{
+		Subject: pkix.Name{
+			Organization: []string{"Test Org"},
+		},
+		KeyUsage: KeyUsageCertSign | KeyUsageKeyEncipherment | KeyUsageDigitalSignature,
+		IsCA:     true,
+	}
+
+	// Generate the traditional and post quantum keys
+	tradPrivKey, err := rsa.GenerateKey(rand.Reader, 4096)
+	if err != nil {
+		return nil, nil, nil, errors.New("Could not generate the RSA key")
+	}
+	_, pqPrivKey, err := mldsa65.GenerateKey(rand.Reader)
+	if err != nil {
+		return nil, nil, nil, errors.New("Could not generate the RSA key")
+	}
+
+	// Generate the chameleon certificate
+	chameleonDer, err := CreateChameleonCertificate(rand.Reader, &template, &template, &template, &template, &tradPrivKey.PublicKey, pqPrivKey.Public(), tradPrivKey, pqPrivKey)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+
+	// Return the parsed certificate
+	chameleonCert, err := ParseCertificate(chameleonDer)
+	return tradPrivKey, pqPrivKey, chameleonCert, err
+}
+
+////////////////////////////////////////////////////////////////////////////////
+//                                                                            //
+// Test data                                                                 //
+//                                                                            //
+////////////////////////////////////////////////////////////////////////////////
 
 const MLDSA_BASE_ECDSA_P521_DELTA = `
 -----BEGIN CERTIFICATE-----

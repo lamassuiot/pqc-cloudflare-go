@@ -1,18 +1,19 @@
 package x509
 
 import (
-	"crypto"
 	"crypto/rand"
 	"crypto/x509/pkix"
 	"encoding/asn1"
 	"errors"
 	"io"
 	"math/big"
+	"reflect"
 )
 
 // Current proposed OID for the delta extension in a "Chameleon" certificate, as defined
 // in the version 6 of the draft (draft-bonnell-lamps-chameleon-certs-06)
 // TODO -> Revise and modify value if the Draft is approved and IANA assigns an OID for
+//
 //	the extension.
 var deltaExtensionOid = asn1.ObjectIdentifier{2, 16, 840, 1, 114027, 80, 6, 1}
 
@@ -37,23 +38,17 @@ type relatedCertificateExtension struct {
 
 // CreateChameleonCertificate creates a new x509 chameleon certificate as per
 // `draft-bonnell-lamps-chameleon-certs-06`.
-func CreateChameleonCertificate(randSource io.Reader, template, deltaParent, baseParent *Certificate, deltaPubKey, basePubKey, deltaPrivKey, basePrivKey any) ([]byte, error) {
+func CreateChameleonCertificate(randSource io.Reader, deltaTemplate, baseTemplate, deltaParent, baseParent *Certificate, deltaPubKey, basePubKey, deltaPrivKey, basePrivKey any) ([]byte, error) {
 	// Generate a secure serial number for the delta certificate
 	serialNumberLimit := new(big.Int).Lsh(big.NewInt(1), 128)
 	deltaSerialNumber, err := rand.Int(randSource, serialNumberLimit)
 	if err != nil {
 		return nil, errors.New("x509: could not generate delta certificate serial number")
 	}
-	template.SerialNumber = deltaSerialNumber
-
-	// Type cast the delta private key
-	deltaKey, ok := deltaPrivKey.(crypto.Signer)
-	if !ok {
-		return nil, errors.New("x509: certificate private key does not implement crypto.Signer")
-	}
+	deltaTemplate.SerialNumber = deltaSerialNumber
 
 	// Generate the delta certificate
-	deltaDer, err := CreateCertificate(randSource, template, deltaParent, deltaPubKey, deltaPrivKey)
+	deltaDer, err := CreateCertificate(randSource, deltaTemplate, deltaParent, deltaPubKey, deltaPrivKey)
 	if err != nil {
 		return nil, err
 	}
@@ -63,49 +58,76 @@ func CreateChameleonCertificate(randSource io.Reader, template, deltaParent, bas
 	}
 
 	// Get the raw values for the necessary fields
-	_, signatureAlgorithm, _ := signingParamsForPublicKey(deltaKey.Public(), template.SignatureAlgorithm)
-	pubKeyBytes, pubKeyAlgorithm, _ := marshalPublicKey(deltaKey.Public())
+	_, signatureAlgorithm, _ := signingParamsForPublicKey(deltaPubKey, deltaTemplate.SignatureAlgorithm)
+	pubKeyBytes, pubKeyAlgorithm, _ := marshalPublicKey(deltaPubKey)
 
 	// Add the delta extension to the template
-	deltaExt := deltaCertificateDescriptor{
-		SerialNumber:       deltaCert.SerialNumber,
-		SignatureAlgorithm: signatureAlgorithm,
-		Issuer: asn1.RawValue{
+	deltaExt := deltaCertificateDescriptor{}
+	deltaExt.SerialNumber = deltaCert.SerialNumber
+	deltaExt.SignatureAlgorithm = signatureAlgorithm
+
+	// Omit issuer if it is the same as the base certificate's issuer
+	if deltaParent.Subject.String() != baseParent.Subject.String() {
+		deltaExt.Issuer = asn1.RawValue{
 			Class:      2,
 			Tag:        1,
 			IsCompound: true,
 			Bytes:      deltaCert.RawIssuer,
-		},
-		Validity: validity{
+		}
+	}
+
+	// Omit validity if is the same as the base certificate's validity
+	if deltaTemplate.NotBefore != baseTemplate.NotBefore || deltaTemplate.NotAfter != baseTemplate.NotAfter {
+		deltaExt.Validity = validity{
 			NotBefore: deltaCert.NotBefore,
 			NotAfter:  deltaCert.NotAfter,
-		},
-		Subject: asn1.RawValue{
+		}
+	}
+
+	// Omit subject if is the same as the base certificate's subject
+	if deltaTemplate.Subject.String() != baseTemplate.Subject.String() {
+		deltaExt.Subject = asn1.RawValue{
 			Class:      2,
 			Tag:        3,
 			IsCompound: true,
 			Bytes:      deltaCert.RawSubject,
-		},
-		PublicKey: publicKeyInfo{
-			Raw:       nil,
-			Algorithm: pubKeyAlgorithm,
-			PublicKey: asn1.BitString{
-				Bytes:     pubKeyBytes,
-				BitLength: len(pubKeyBytes) * 8,
-			},
-		},
-		Extensions: deltaCert.Extensions,
-		SignatureValue: asn1.BitString{
-			Bytes:     deltaCert.Signature,
-			BitLength: len(deltaCert.Signature) * 8,
+		}
+	}
+
+	deltaExt.PublicKey = publicKeyInfo{
+		Raw:       nil,
+		Algorithm: pubKeyAlgorithm,
+		PublicKey: asn1.BitString{
+			Bytes:     pubKeyBytes,
+			BitLength: len(pubKeyBytes) * 8,
 		},
 	}
+
+	// Omit duplicate extensions
+	if !reflect.DeepEqual(deltaTemplate.Extensions, baseTemplate.Extensions) {
+		deltaExt.Extensions = deltaCert.Extensions
+	}
+
+	// Copy the necessary extensions:
+	// 	- Subject Key Identifier
+	for _, ext := range deltaCert.Extensions {
+		if ext.Id.Equal(oidExtensionSubjectKeyId) {
+			deltaExt.Extensions = append(deltaExt.Extensions, ext)
+		}
+	}
+
+	deltaExt.SignatureValue = asn1.BitString{
+		Bytes:     deltaCert.Signature,
+		BitLength: len(deltaCert.Signature) * 8,
+	}
+
+	// Encode the delta certificate descriptor extension
 	rawDeltaExt, err := asn1.MarshalWithParams(deltaExt, `asn1:"optional"`)
 
 	if err != nil {
 		return nil, err
 	}
-	template.ExtraExtensions = []pkix.Extension{
+	baseTemplate.ExtraExtensions = []pkix.Extension{
 		{
 			Id:    deltaExtensionOid,
 			Value: rawDeltaExt,
@@ -117,10 +139,10 @@ func CreateChameleonCertificate(randSource io.Reader, template, deltaParent, bas
 	if err != nil {
 		return nil, errors.New("x509: could not generate base certificate serial number")
 	}
-	template.SerialNumber = baseSerialNumber
+	baseTemplate.SerialNumber = baseSerialNumber
 
 	// Generate the base/outer certificate
-	return CreateCertificate(randSource, template, baseParent, basePubKey, basePrivKey)
+	return CreateCertificate(randSource, baseTemplate, baseParent, basePubKey, basePrivKey)
 }
 
 func ReconstructDeltaCertificate(base *Certificate) (*Certificate, error) {
@@ -240,7 +262,7 @@ func CreateBoundCertificate(randSource io.Reader, template, parent *Certificate,
 	// Add the extension to the template
 	template.ExtraExtensions = []pkix.Extension{
 		{
-			Id: relatedCertificateExtensionOid,
+			Id:    relatedCertificateExtensionOid,
 			Value: rawRelatedCertExtension,
 		},
 	}

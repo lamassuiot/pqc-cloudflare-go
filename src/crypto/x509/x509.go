@@ -286,7 +286,7 @@ var publicKeyAlgoName = [...]string{
 	Ed25519:      "Ed25519",
 	EdDilithium2: "Ed25519-Dilithium2",
 	EdDilithium3: "Ed448-Dilithium3",
-	MLDSA:      "ML-DSA",
+	MLDSA:        "ML-DSA",
 }
 
 func (algo PublicKeyAlgorithm) String() string {
