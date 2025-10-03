@@ -235,6 +235,97 @@ func TestDeltaCertificateExtensionContentWhenDeltaAndBaseParentTemplateIsTheSame
 	}
 }
 
+func TestDeltaCertificateExtensionContentWhenDeltaAndBaseHaveDifferentExtensions(t *testing.T) {
+	// Create a templates with some differing extensions
+	deltaExtensions := []pkix.Extension{
+		{
+			Id:    oidExtensionSubjectKeyId,
+			Value: []byte{0x01},
+		},
+		{
+			Id:    oidExtensionAuthorityKeyId,
+			Value: []byte{0x01},
+		},
+		{
+			Id:    oidExtensionSubjectAltName,
+			Value: []byte{0xde, 0xad, 0xbe, 0xef},
+		},
+	}
+	deltaTemplate := Certificate{
+		Subject: pkix.Name{
+			Organization: []string{"Test Org"},
+		},
+		KeyUsage:   KeyUsageCertSign | KeyUsageKeyEncipherment | KeyUsageDigitalSignature,
+		IsCA:       true,
+		Extensions: deltaExtensions,
+	}
+
+	baseExtensions := []pkix.Extension{
+		{
+			Id:    oidExtensionSubjectKeyId,
+			Value: []byte{0x02},
+		},
+		{
+			Id:    oidExtensionAuthorityKeyId,
+			Value: []byte{0x02},
+		},
+		{
+			Id:    oidExtensionSubjectAltName,
+			Value: []byte{0xde, 0xad, 0xbe, 0xef},
+		},
+	}
+	baseTemplate := Certificate{
+		Subject: pkix.Name{
+			Organization: []string{"Test Org"},
+		},
+		KeyUsage:   KeyUsageCertSign | KeyUsageKeyEncipherment | KeyUsageDigitalSignature,
+		IsCA:       true,
+		Extensions: baseExtensions,
+	}
+
+	// Generate the traditional and post quantum keys
+	tradPrivKey, err := rsa.GenerateKey(rand.Reader, 4096)
+	if err != nil {
+		t.Error("Could not generate the RSA key")
+	}
+	_, pqPrivKey, err := mldsa65.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Error("Could not generate the RSA key")
+	}
+
+	// Generate the chameleon certificate
+	chameleonDer, err := CreateChameleonCertificate(
+		rand.Reader, &deltaTemplate, &baseTemplate, &deltaTemplate, &baseTemplate, &tradPrivKey.PublicKey, pqPrivKey.Public(), tradPrivKey, pqPrivKey)
+	if err != nil {
+		t.Error(err)
+	}
+
+	// Return the parsed certificate
+	chameleonCert, err := ParseCertificate(chameleonDer)
+	if err != nil {
+		t.Error(err)
+	}
+
+	// Get the Raw Delta Extension
+	var deltaExtension pkix.Extension
+	for _, extension := range chameleonCert.Extensions {
+		if extension.Id.Equal(deltaExtensionOid) {
+			deltaExtension = extension
+		}
+	}
+	dcd, err := parseDeltaExtension(deltaExtension.Value)
+	if err != nil {
+		t.Error("Invalid delta extension")
+	}
+
+	// Check that the DCD extension only contains the different extensions
+	for _, ext := range dcd.Extensions {
+		if !ext.Id.Equal(oidExtensionSubjectKeyId) && !ext.Id.Equal(oidExtensionAuthorityKeyId) {
+			t.Errorf("DCD contains unnecessary extension: %v", ext.Id)
+		}
+	}
+}
+
 func TestCreateBoundRootCertificate(t *testing.T) {
 	// Generate a new template
 	serialNumberLimit := new(big.Int).Lsh(big.NewInt(1), 128)

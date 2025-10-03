@@ -1,13 +1,13 @@
 package x509
 
 import (
+	"bytes"
 	"crypto/rand"
 	"crypto/x509/pkix"
 	"encoding/asn1"
 	"errors"
 	"io"
 	"math/big"
-	"reflect"
 )
 
 // Current proposed OID for the delta extension in a "Chameleon" certificate, as defined
@@ -103,15 +103,21 @@ func CreateChameleonCertificate(randSource io.Reader, deltaTemplate, baseTemplat
 		},
 	}
 
-	// Omit duplicate extensions
-	if !reflect.DeepEqual(deltaTemplate.Extensions, baseTemplate.Extensions) {
-		deltaExt.Extensions = deltaCert.Extensions
+	// For efficiency's sake, convert the base template extensions into a map to avoid O(n*m)
+	// complexity in the for loop
+	baseExtensions := make(map[string]pkix.Extension)
+	for _, ext := range baseTemplate.Extensions {
+		baseExtensions[ext.Id.String()] = ext
 	}
 
-	// Copy the necessary extensions:
-	// 	- Subject Key Identifier
+	// Copy the necessary extensions and avoid duplication as per the draft's indications
+	// 	- Subject Key Identifier MUST be copied
+	//  - Extensions with different value must be copied
 	for _, ext := range deltaCert.Extensions {
-		if ext.Id.Equal(oidExtensionSubjectKeyId) {
+		baseExt, ok := baseExtensions[ext.Id.String()]
+		appendExtension := ext.Id.Equal(oidExtensionSubjectKeyId) || ok && !bytes.Equal(ext.Value, baseExt.Value)
+
+		if appendExtension {
 			deltaExt.Extensions = append(deltaExt.Extensions, ext)
 		}
 	}
