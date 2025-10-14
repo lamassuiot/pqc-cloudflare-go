@@ -326,6 +326,35 @@ func TestDeltaCertificateExtensionContentWhenDeltaAndBaseHaveDifferentExtensions
 	}
 }
 
+func TestChameleonCertificateHonorsExtraExtensions(t *testing.T) {
+	rawValues := []asn1.RawValue{}
+	rawValues = append(rawValues, asn1.RawValue{Tag: nameTypeDNS, Class: 2, Bytes: []byte("dev.lamassu.io")})
+	value, _ := asn1.Marshal(rawValues)
+	extensions := []pkix.Extension{
+		{
+			Id:    oidExtensionSubjectAltName, // Subject Alternative Name OID
+			Value: value,
+		},
+	}
+
+	// Generate the certificate
+	_, _, chameleonCert, err := createChameleonRootWithExtensions(extensions)
+	if err != nil {
+		t.Error(err)
+	}
+
+	// Check that the chameleon certificate contains the Extra extension
+	found := false
+	for _, ext := range chameleonCert.Extensions {
+		if ext.Id.String() == (asn1.ObjectIdentifier)(oidExtensionSubjectAltName).String() {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("Expected the chameleon certificate to have a SAN extension")
+	}
+}
+
 func TestCreateBoundRootCertificate(t *testing.T) {
 	// Generate a new template
 	serialNumberLimit := new(big.Int).Lsh(big.NewInt(1), 128)
@@ -411,7 +440,23 @@ func createChameleonRoot() (crypto.Signer, crypto.Signer, *Certificate, error) {
 		KeyUsage: KeyUsageCertSign | KeyUsageKeyEncipherment | KeyUsageDigitalSignature,
 		IsCA:     true,
 	}
+	return createChameleonCertificate(&template)
+}
 
+func createChameleonRootWithExtensions(extensions []pkix.Extension) (crypto.Signer, crypto.Signer, *Certificate, error) {
+	// Generate a root chameleon certificate
+	template := Certificate{
+		Subject: pkix.Name{
+			Organization: []string{"Test Org"},
+		},
+		KeyUsage:        KeyUsageCertSign | KeyUsageKeyEncipherment | KeyUsageDigitalSignature,
+		IsCA:            true,
+		ExtraExtensions: extensions,
+	}
+	return createChameleonCertificate(&template)
+}
+
+func createChameleonCertificate(template *Certificate) (crypto.Signer, crypto.Signer, *Certificate, error) {
 	// Generate the traditional and post quantum keys
 	tradPrivKey, err := rsa.GenerateKey(rand.Reader, 4096)
 	if err != nil {
@@ -423,7 +468,7 @@ func createChameleonRoot() (crypto.Signer, crypto.Signer, *Certificate, error) {
 	}
 
 	// Generate the chameleon certificate
-	chameleonDer, err := CreateChameleonCertificate(rand.Reader, &template, &template, &template, &template, &tradPrivKey.PublicKey, pqPrivKey.Public(), tradPrivKey, pqPrivKey)
+	chameleonDer, err := CreateChameleonCertificate(rand.Reader, template, template, template, template, &tradPrivKey.PublicKey, pqPrivKey.Public(), tradPrivKey, pqPrivKey)
 	if err != nil {
 		return nil, nil, nil, err
 	}

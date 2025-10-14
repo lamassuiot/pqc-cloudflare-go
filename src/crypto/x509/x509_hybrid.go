@@ -133,12 +133,10 @@ func CreateChameleonCertificate(randSource io.Reader, deltaTemplate, baseTemplat
 	if err != nil {
 		return nil, err
 	}
-	baseTemplate.ExtraExtensions = []pkix.Extension{
-		{
-			Id:    deltaExtensionOid,
-			Value: rawDeltaExt,
-		},
-	}
+	baseTemplate.ExtraExtensions = append(baseTemplate.ExtraExtensions, pkix.Extension{
+		Id:    deltaExtensionOid,
+		Value: rawDeltaExt,
+	})
 
 	// Change the serial number to generate the base/outer certificate
 	baseSerialNumber, err := rand.Int(randSource, serialNumberLimit)
