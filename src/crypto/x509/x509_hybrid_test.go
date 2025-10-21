@@ -4,13 +4,21 @@ import (
 	"bytes"
 	"cloudflare/circl/sign/mldsa/mldsa65"
 	"crypto"
+	"crypto/ecdsa"
+	"crypto/ed25519"
+	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/rsa"
+	"crypto/sha1"
+	"crypto/sha256"
+	"crypto/sha512"
 	"crypto/x509/pkix"
 	"encoding/asn1"
 	"encoding/pem"
-	"errors"
+	"fmt"
+	"hash"
 	"math/big"
+	// "strings"
 	"testing"
 )
 
@@ -356,72 +364,56 @@ func TestChameleonCertificateHonorsExtraExtensions(t *testing.T) {
 }
 
 func TestCreateBoundRootCertificate(t *testing.T) {
-	// Generate a new template
-	serialNumberLimit := new(big.Int).Lsh(big.NewInt(1), 128)
-	serialNumber, err := rand.Int(rand.Reader, serialNumberLimit)
-	if err != nil {
-		t.Error("Error generating the serial number")
-	}
-	template := Certificate{
-		SerialNumber: serialNumber,
-		Subject: pkix.Name{
-			Organization: []string{"Test Org"},
+	testcases := []struct {
+		name                string
+		privateKeyGenerator func() (crypto.Signer, error)
+	}{
+		{
+			name: "SHA256-RSA/MLDSA",
+			privateKeyGenerator: func() (crypto.Signer, error) {
+				return rsa.GenerateKey(rand.Reader, 4096)
+			},
 		},
-		KeyUsage: KeyUsageCertSign | KeyUsageKeyEncipherment | KeyUsageDigitalSignature,
-		IsCA:     true,
+		{
+			name: "SHA512-ECDSA/MLDSA",
+			privateKeyGenerator: func() (crypto.Signer, error) {
+				return ecdsa.GenerateKey(elliptic.P521(), rand.Reader)
+			},
+		},
+		{
+			name: "PureEd25519/MLDSA",
+			privateKeyGenerator: func() (crypto.Signer, error) {
+				_, privKey, err := ed25519.GenerateKey(rand.Reader)
+				return privKey, err
+			},
+		},
 	}
 
-	// Generate a traditional certificate
-	tradPrivKey, err := rsa.GenerateKey(rand.Reader, 4096)
-	if err != nil {
-		t.Error("Could not generate the RSA key")
-	}
-	relatedCertDer, err := CreateCertificate(rand.Reader, &template, &template, tradPrivKey.Public(), tradPrivKey)
-	if err != nil {
-		t.Error("Could not generate the base certificate")
-	}
-	relatedCert, err := parseCertificate(relatedCertDer)
-	if err != nil {
-		t.Error("Could not parse the base certificate")
-	}
+	for _, tc := range testcases {
+		t.Run(tc.name, func(t *testing.T) {
+			relatedCert, pqCert, err := createBoundCertificatePair(tc.privateKeyGenerator)
+			if err != nil {
+				t.Error(err)
+			}
 
-	// Generate the Post-Quantum private key
-	_, pqPrivKey, err := mldsa65.GenerateKey(rand.Reader)
-	if err != nil {
-		t.Error("Could not generate the RSA key")
-	}
+			// Expect the bound certificate to contain the Related Certificate Extension
+			parsedExtension, err := parseRelatedCertificateExtension(pqCert)
+			if err != nil {
+				t.Error(err)
+			}
 
-	// Create the bound certificate
-	pqDerBytes, err := CreateBoundCertificate(rand.Reader, &template, &template, relatedCertDer, pqPrivKey.Public(), pqPrivKey)
-	if err != nil {
-		t.Errorf("Error generating the Bound Certificate: %v", err)
-	}
-	pqCert, err := ParseCertificate(pqDerBytes)
-	if err != nil {
-		t.Errorf("Error parsing the Bound Certificate: %v", err)
-	}
+			// Expect the hash algorithm to be the one specified in the related certificate
+			sigAlgo := getSignatureAlgorithmFromAI(parsedExtension.HashAlgorithm)
+			if sigAlgo != relatedCert.SignatureAlgorithm {
+				t.Errorf("Error: expected '%v' signature algorithm but got '%v'", relatedCert.SignatureAlgorithm, sigAlgo)
+			}
 
-	// Expect the bound certificate to contain the Related Certificate Extension
-	present := false
-	var relatedCertExtension pkix.Extension
-	for _, ext := range pqCert.Extensions {
-		if ext.Id.Equal(relatedCertificateExtensionOid) {
-			present = true
-			relatedCertExtension = ext
-		}
-	}
-	if !present {
-		t.Error("Error: the bound Post-Quantum certificate does not contain the related certificate extension")
-	}
-
-	// Parse the extension
-	var parsedExtension relatedCertificateExtension
-	_, err = asn1.Unmarshal(relatedCertExtension.Value, &parsedExtension)
-
-	// Expect the hash algorithm to be the one specified in the related certificate
-	sigAlgo := getSignatureAlgorithmFromAI(parsedExtension.HashAlgorithm)
-	if sigAlgo != relatedCert.SignatureAlgorithm {
-		t.Errorf("Error: expected '%v' signature algorithm but got '%v'", relatedCert.SignatureAlgorithm, sigAlgo)
+			// Expect the hash value to correspond with the related certificate
+			err = validateRelateCertificateHash(relatedCert, parsedExtension.HashAlgorithm.Algorithm, parsedExtension.HashValue)
+			if err != nil {
+				t.Error("Error: hash value not valid")
+			}
+		})
 	}
 }
 
@@ -460,11 +452,11 @@ func createChameleonCertificate(template *Certificate) (crypto.Signer, crypto.Si
 	// Generate the traditional and post quantum keys
 	tradPrivKey, err := rsa.GenerateKey(rand.Reader, 4096)
 	if err != nil {
-		return nil, nil, nil, errors.New("Could not generate the RSA key")
+		return nil, nil, nil, fmt.Errorf("Could not generate the RSA key")
 	}
 	_, pqPrivKey, err := mldsa65.GenerateKey(rand.Reader)
 	if err != nil {
-		return nil, nil, nil, errors.New("Could not generate the RSA key")
+		return nil, nil, nil, fmt.Errorf("Could not generate the RSA key")
 	}
 
 	// Generate the chameleon certificate
@@ -476,6 +468,109 @@ func createChameleonCertificate(template *Certificate) (crypto.Signer, crypto.Si
 	// Return the parsed certificate
 	chameleonCert, err := ParseCertificate(chameleonDer)
 	return tradPrivKey, pqPrivKey, chameleonCert, err
+}
+
+func createBoundCertificatePair(privateKeyGenerator func() (crypto.Signer, error)) (*Certificate, *Certificate, error) {
+	// Generate a new template
+	serialNumberLimit := new(big.Int).Lsh(big.NewInt(1), 128)
+	serialNumber, err := rand.Int(rand.Reader, serialNumberLimit)
+	if err != nil {
+		return nil, nil, fmt.Errorf("Error generating the serial number")
+	}
+	template := Certificate{
+		SerialNumber: serialNumber,
+		Subject: pkix.Name{
+			Organization: []string{"Test Org"},
+		},
+		KeyUsage: KeyUsageCertSign | KeyUsageKeyEncipherment | KeyUsageDigitalSignature,
+		IsCA:     true,
+	}
+
+	// Generate a traditional certificate
+	tradPrivKey, err := privateKeyGenerator()
+	if err != nil {
+		return nil, nil, fmt.Errorf("Could not generate the RSA key")
+	}
+	relatedCertDer, err := CreateCertificate(rand.Reader, &template, &template, tradPrivKey.Public(), tradPrivKey)
+	if err != nil {
+		return nil, nil, fmt.Errorf("Could not generate the base certificate")
+	}
+	relatedCert, err := parseCertificate(relatedCertDer)
+	if err != nil {
+		return nil, nil, fmt.Errorf("Could not parse the base certificate")
+	}
+
+	// Generate the Post-Quantum private key
+	_, pqPrivKey, err := mldsa65.GenerateKey(rand.Reader)
+	if err != nil {
+		return nil, nil, fmt.Errorf("Could not generate the RSA key")
+	}
+
+	// Create the bound certificate
+	pqDerBytes, err := CreateBoundCertificate(rand.Reader, &template, &template, relatedCertDer, pqPrivKey.Public(), pqPrivKey)
+	if err != nil {
+		return nil, nil, fmt.Errorf("Error generating the Bound Certificate: %v", err)
+	}
+	pqCert, err := ParseCertificate(pqDerBytes)
+	if err != nil {
+		return nil, nil, fmt.Errorf("Error parsing the Bound Certificate: %v", err)
+	}
+
+	return relatedCert, pqCert, nil
+}
+
+func validateRelateCertificateHash(relatedCert *Certificate, sigAlgo asn1.ObjectIdentifier, hashValue []byte) error {
+	var hashAlgo hash.Hash
+	switch sigAlgo.String() {
+	case oidSignatureSHA1WithRSA.String(), oidSignatureDSAWithSHA1.String(), oidSignatureECDSAWithSHA1.String():
+		hashAlgo = sha1.New()
+	case oidSignatureSHA256WithRSA.String(), oidSignatureDSAWithSHA256.String(), oidSignatureECDSAWithSHA256.String():
+		hashAlgo = sha256.New()
+	case oidSignatureSHA384WithRSA.String(), oidSignatureECDSAWithSHA384.String():
+		hashAlgo = sha512.New384()
+	case oidSignatureSHA512WithRSA.String(), oidSignatureECDSAWithSHA512.String():
+		hashAlgo = sha512.New()
+	default:
+		hashAlgo = sha256.New()
+	}
+
+	_, err := hashAlgo.Write(relatedCert.Raw)
+	if err != nil {
+		return err
+	}
+	hash := hashAlgo.Sum(nil)
+
+	valid := bytes.Equal(hash[:], hashValue)
+	if !valid {
+		return fmt.Errorf("Error: hash value not valid")
+	}
+
+	return nil
+}
+
+func parseRelatedCertificateExtension(certificate *Certificate) (*relatedCertificateExtension, error) {
+	// Expect the bound certificate to contain the Related Certificate Extension
+	present := false
+	var relatedCertExtension pkix.Extension
+	for _, ext := range certificate.Extensions {
+		if ext.Id.Equal(relatedCertificateExtensionOid) {
+			present = true
+			relatedCertExtension = ext
+		}
+	}
+	if !present {
+		return nil, fmt.Errorf("Error: the bound Post-Quantum certificate does not contain the related certificate extension")
+	}
+
+	// Parse the extension
+	var parsedExtension relatedCertificateExtension
+	_, err := asn1.Unmarshal(relatedCertExtension.Value, &parsedExtension)
+
+	if err != nil {
+		return nil, fmt.Errorf("Error: could not parse the RelatedCertificate extension")
+	}
+
+	return &parsedExtension, nil
 }
 
 ////////////////////////////////////////////////////////////////////////////////

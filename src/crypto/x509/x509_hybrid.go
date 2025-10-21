@@ -3,9 +3,13 @@ package x509
 import (
 	"bytes"
 	"crypto/rand"
+	"crypto/sha1"
+	"crypto/sha256"
+	"crypto/sha512"
 	"crypto/x509/pkix"
 	"encoding/asn1"
 	"errors"
+	"hash"
 	"io"
 	"math/big"
 )
@@ -254,9 +258,16 @@ func CreateBoundCertificate(randSource io.Reader, template, parent *Certificate,
 		return nil, err
 	}
 
+	// Compute the hash value of the relate cert
+	hashValue, err := computeRelatedCertHash(signatureAlgorithm.Algorithm, relatedCert)
+	if err != nil {
+		return nil, err
+	}
+
 	// Build and encode the related certificate extension
 	relatedCertExtension := relatedCertificateExtension{
 		HashAlgorithm: signatureAlgorithm,
+		HashValue:     hashValue,
 	}
 	rawRelatedCertExtension, err := asn1.Marshal(relatedCertExtension)
 	if err != nil {
@@ -273,6 +284,30 @@ func CreateBoundCertificate(randSource io.Reader, template, parent *Certificate,
 
 	// Create the certificate
 	return CreateCertificate(randSource, template, parent, pubKey, privKey)
+}
+
+func computeRelatedCertHash(signatureAlgorithm asn1.ObjectIdentifier, relatedCertificate *Certificate) ([]byte, error) {
+	var hashAlgo hash.Hash
+	switch signatureAlgorithm.String() {
+	case oidSignatureSHA1WithRSA.String(), oidSignatureDSAWithSHA1.String(), oidSignatureECDSAWithSHA1.String():
+		hashAlgo = sha1.New()
+	case oidSignatureSHA256WithRSA.String(), oidSignatureDSAWithSHA256.String(), oidSignatureECDSAWithSHA256.String():
+		hashAlgo = sha256.New()
+	case oidSignatureSHA384WithRSA.String(), oidSignatureECDSAWithSHA384.String():
+		hashAlgo = sha512.New384()
+	case oidSignatureSHA512WithRSA.String(), oidSignatureECDSAWithSHA512.String():
+		hashAlgo = sha512.New()
+	default:
+		hashAlgo = sha256.New()
+	}
+
+	_, err := hashAlgo.Write(relatedCertificate.Raw)
+	if err != nil {
+		return nil, err
+	}
+	hash := hashAlgo.Sum(nil)
+
+	return hash[:], nil
 }
 
 func parseDeltaExtension(deltaDer []byte) (*deltaCertificateDescriptor, error) {
