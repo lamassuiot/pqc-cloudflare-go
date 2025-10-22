@@ -18,7 +18,7 @@ import (
 	"fmt"
 	"hash"
 	"math/big"
-	// "strings"
+	"reflect"
 	"testing"
 )
 
@@ -373,6 +373,78 @@ func TestChameleonDeltaCSRAttributeOids(t *testing.T) {
 	expectedOid = asn1.ObjectIdentifier{2, 16, 840, 1, 114027, 80, 6, 3}
 	if !deltaCertificateRequestSignatureAttributeOid.Equal(expectedOid) {
 		t.Errorf("Error: expected %s got %s", expectedOid, deltaCertificateRequestSignatureAttributeOid)
+	}
+}
+
+func TestChameleonDeltaCSRAttributeSubjectPKInfo(t *testing.T) {
+	testcases := []struct {
+		name             string
+		privKeyGenerator func() (crypto.Signer, error)
+	}{
+		{
+			name: "RSA",
+			privKeyGenerator: func() (crypto.Signer, error) {
+				return rsa.GenerateKey(rand.Reader, 4096)
+			},
+		},
+		{
+			name: "MLDSA",
+			privKeyGenerator: func() (crypto.Signer, error) {
+				_, key, err := mldsa65.GenerateKey(rand.Reader)
+				return key, err
+			},
+		},
+	}
+
+	for _, tc := range testcases {
+		// Get the base key
+		_, basePrivKey, err := ed25519.GenerateKey(rand.Reader)
+
+		// Generate the delta key
+		deltaPrivKey, _ := tc.privKeyGenerator()
+		deltaPubKeyBytes, deltaPublicKeyAlgorithm, _ := marshalPublicKey(deltaPrivKey.Public())
+
+		// Create a Delta CSR
+		template := CertificateRequest{
+			Subject: pkix.Name{CommonName: "Test CSR"},
+		}
+		csrBytes, err := CreateChameleonCertificateRequest(rand.Reader, &template, &template, deltaPrivKey, basePrivKey)
+		if err != nil {
+			t.Errorf("Error: unexpected error when creating the Delta CSR %v", err)
+		}
+
+		// Parse the CSR
+		csr, err := ParseCertificateRequest(csrBytes)
+		if err != nil {
+			t.Errorf("Error: unexpected error when parsing the Delta CSR %v", err)
+		}
+
+		// Recover the DeltaCertificateRequest attribute
+		var deltaCsrAttribute pkix.Extension
+		for _, ext := range csr.Extensions {
+			if ext.Id.Equal(deltaCertificateRequestAttributeOid) {
+				deltaCsrAttribute = ext
+			}
+		}
+		if deltaCsrAttribute.Value == nil {
+			t.Errorf("Error: the CSR does not contain a Delta CSR attribute")
+		}
+
+		// Parse the extension
+		parsedAttribute, err := parseDeltaCertificateRequestAttribute(deltaCsrAttribute.Value)
+		if err != nil {
+			t.Errorf("Error: unexpected error when parsing the delta CSR attribute: %v", err)
+		}
+
+		// Verify the public key information of the base CSR corresponds to the base priv key
+		if !reflect.DeepEqual(csr.PublicKey, basePrivKey.Public()) {
+			t.Errorf("Error: the CSR contains an incorrect public key")
+		}
+
+		// Verify the extension contains the correct public key info
+		if !parsedAttribute.PublicKeyInfo.Algorithm.Algorithm.Equal(deltaPublicKeyAlgorithm.Algorithm) || !bytes.Equal(parsedAttribute.PublicKeyInfo.PublicKey.Bytes, deltaPubKeyBytes) {
+			t.Errorf("Error: the delta CSR attribute specifies an incorrect public key")
+		}
 	}
 }
 

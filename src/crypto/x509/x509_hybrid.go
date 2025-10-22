@@ -2,6 +2,7 @@ package x509
 
 import (
 	"bytes"
+	"crypto"
 	"crypto/rand"
 	"crypto/sha1"
 	"crypto/sha256"
@@ -42,6 +43,10 @@ type deltaCertificateDescriptor struct {
 type relatedCertificateExtension struct {
 	HashAlgorithm pkix.AlgorithmIdentifier
 	HashValue     []byte
+}
+
+type deltaCertificateRequestAttribute struct {
+	PublicKeyInfo publicKeyInfo
 }
 
 // CreateChameleonCertificate creates a new x509 chameleon certificate as per
@@ -137,10 +142,10 @@ func CreateChameleonCertificate(randSource io.Reader, deltaTemplate, baseTemplat
 
 	// Encode the delta certificate descriptor extension
 	rawDeltaExt, err := asn1.MarshalWithParams(deltaExt, `asn1:"optional"`)
-
 	if err != nil {
 		return nil, err
 	}
+
 	baseTemplate.ExtraExtensions = append(baseTemplate.ExtraExtensions, pkix.Extension{
 		Id:    deltaExtensionOid,
 		Value: rawDeltaExt,
@@ -249,6 +254,51 @@ func ReconstructDeltaCertificate(base *Certificate) (*Certificate, error) {
 	return deltaCert, nil
 }
 
+func CreateChameleonCertificateRequest(rand io.Reader, deltaTemplate, baseTemplate *CertificateRequest, deltaPrivKey, basePrivKey any) ([]byte, error) {
+	// Generate the delta CSR
+	// deltaCsrDer, err := CreateCertificateRequest(rand, deltaTemplate, deltaPrivKey)
+	// if err != nil {
+	// 	return nil, err
+	// }
+	//
+	// deltaCsr, err := ParseCertificateRequest(deltaCsrDer)
+	// if err != nil {
+	// 	return nil, err
+	// }
+
+	// Create the delta attribute
+	deltaAttribute := deltaCertificateRequestAttribute{}
+
+	// Add the subject public key information
+	key, ok := deltaPrivKey.(crypto.Signer)
+	if !ok {
+		return nil, errors.New("Error: invalid delta private key")
+	}
+	pubKeyBytes, pubKeyAlgorithm, err := marshalPublicKey(key.Public())
+	deltaAttribute.PublicKeyInfo = publicKeyInfo{
+		Raw:       nil,
+		Algorithm: pubKeyAlgorithm,
+		PublicKey: asn1.BitString{
+			Bytes:     pubKeyBytes,
+			BitLength: len(pubKeyBytes) * 8,
+		},
+	}
+
+	// Add the attribute to the base CSR template
+	rawDeltaAttribute, err := asn1.MarshalWithParams(deltaAttribute, `asn1:"optional"`)
+	if err != nil {
+		return nil, err
+	}
+
+	baseTemplate.ExtraExtensions = append(baseTemplate.ExtraExtensions, pkix.Extension{
+		Id:    deltaCertificateRequestAttributeOid,
+		Value: rawDeltaAttribute,
+	})
+
+	// Build the Base CSR
+	return CreateCertificateRequest(rand, baseTemplate, basePrivKey)
+}
+
 func CreateBoundCertificate(randSource io.Reader, template, parent *Certificate, relatedCertDer []byte, pubKey, privKey any) ([]byte, error) {
 	// Parse the related certificate
 	relatedCert, err := ParseCertificate(relatedCertDer)
@@ -324,6 +374,18 @@ func parseDeltaExtension(deltaDer []byte) (*deltaCertificateDescriptor, error) {
 
 	// Return the result
 	return &deltaExtension, nil
+}
+
+func parseDeltaCertificateRequestAttribute(deltaDer []byte) (*deltaCertificateRequestAttribute, error) {
+	// Attempt to parse the delta extension
+	deltaAttribute := deltaCertificateRequestAttribute{}
+	_, err := asn1.Unmarshal(deltaDer, &deltaAttribute)
+	if err != nil {
+		return nil, err
+	}
+
+	// Return the result
+	return &deltaAttribute, nil
 }
 
 func (c *Certificate) deriveRawCertificate() error {
