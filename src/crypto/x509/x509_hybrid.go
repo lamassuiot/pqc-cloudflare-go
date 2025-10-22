@@ -24,6 +24,10 @@ var deltaExtensionOid = asn1.ObjectIdentifier{2, 16, 840, 1, 114027, 80, 6, 1}
 // OID for the RelatedCertificate Extension as per RFC-9763
 var relatedCertificateExtensionOid = asn1.ObjectIdentifier{1, 3, 6, 1, 5, 5, 7, 1}
 
+// OIDs for the Delta CSR
+var deltaCertificateRequestAttributeOid = asn1.ObjectIdentifier{2, 16, 840, 1, 114027, 80, 6, 2}
+var deltaCertificateRequestSignatureAttributeOid = asn1.ObjectIdentifier{2, 16, 840, 1, 114027, 80, 6, 3}
+
 type deltaCertificateDescriptor struct {
 	SerialNumber       *big.Int
 	SignatureAlgorithm pkix.AlgorithmIdentifier `asn1:"optional,explicit,tag:0"`

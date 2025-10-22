@@ -27,7 +27,7 @@ import (
 
 ////////////////////////////////////////////////////////////////////////////////
 //                                                                            //
-// Test Cases                                                                //
+// Test Cases                                                                 //
 //                                                                            //
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -360,6 +360,19 @@ func TestChameleonCertificateHonorsExtraExtensions(t *testing.T) {
 	}
 	if !found {
 		t.Error("Expected the chameleon certificate to have a SAN extension")
+	}
+}
+
+// TODO -> modify when IANA assigns an official OIDs
+func TestChameleonDeltaCSRAttributeOids(t *testing.T) {
+	expectedOid := asn1.ObjectIdentifier{2, 16, 840, 1, 114027, 80, 6, 2}
+	if !deltaCertificateRequestAttributeOid.Equal(expectedOid) {
+		t.Errorf("Error: expected %s got %s", expectedOid, deltaCertificateRequestAttributeOid)
+	}
+
+	expectedOid = asn1.ObjectIdentifier{2, 16, 840, 1, 114027, 80, 6, 3}
+	if !deltaCertificateRequestSignatureAttributeOid.Equal(expectedOid) {
+		t.Errorf("Error: expected %s got %s", expectedOid, deltaCertificateRequestSignatureAttributeOid)
 	}
 }
 
