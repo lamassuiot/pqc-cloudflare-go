@@ -416,7 +416,6 @@ func TestChameleonDeltaCSRAttributeSubjectPKInfo(t *testing.T) {
 		if err != nil {
 			t.Error(err)
 		}
-		pem.Encode(os.Stdout, &pem.Block{Type: "CERTIFICATE SIGNING REQUEST", Bytes: csr.Raw})
 
 		// Verify the public key information of the base CSR corresponds to the base priv key
 		if !reflect.DeepEqual(csr.PublicKey, basePrivKey.Public()) {
