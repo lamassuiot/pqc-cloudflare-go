@@ -46,6 +46,7 @@ type relatedCertificateExtension struct {
 }
 
 type deltaCertificateRequestAttribute struct {
+	Subject       asn1.RawValue `asn1:"optional,explicit,tag:0"`
 	PublicKeyInfo publicKeyInfo
 }
 
@@ -82,7 +83,7 @@ func CreateChameleonCertificate(randSource io.Reader, deltaTemplate, baseTemplat
 	// Omit issuer if it is the same as the base certificate's issuer
 	if deltaParent.Subject.String() != baseParent.Subject.String() {
 		deltaExt.Issuer = asn1.RawValue{
-			Class:      2,
+			Class:      asn1.ClassContextSpecific,
 			Tag:        1,
 			IsCompound: true,
 			Bytes:      deltaCert.RawIssuer,
@@ -100,7 +101,7 @@ func CreateChameleonCertificate(randSource io.Reader, deltaTemplate, baseTemplat
 	// Omit subject if is the same as the base certificate's subject
 	if deltaTemplate.Subject.String() != baseTemplate.Subject.String() {
 		deltaExt.Subject = asn1.RawValue{
-			Class:      2,
+			Class:      asn1.ClassContextSpecific,
 			Tag:        3,
 			IsCompound: true,
 			Bytes:      deltaCert.RawSubject,
@@ -256,18 +257,28 @@ func ReconstructDeltaCertificate(base *Certificate) (*Certificate, error) {
 
 func CreateChameleonCertificateRequest(rand io.Reader, deltaTemplate, baseTemplate *CertificateRequest, deltaPrivKey, basePrivKey any) ([]byte, error) {
 	// Generate the delta CSR
-	// deltaCsrDer, err := CreateCertificateRequest(rand, deltaTemplate, deltaPrivKey)
-	// if err != nil {
-	// 	return nil, err
-	// }
-	//
-	// deltaCsr, err := ParseCertificateRequest(deltaCsrDer)
-	// if err != nil {
-	// 	return nil, err
-	// }
+	deltaCsrDer, err := CreateCertificateRequest(rand, deltaTemplate, deltaPrivKey)
+	if err != nil {
+		return nil, err
+	}
+
+	deltaCsr, err := ParseCertificateRequest(deltaCsrDer)
+	if err != nil {
+		return nil, err
+	}
 
 	// Create the delta attribute
 	deltaAttribute := deltaCertificateRequestAttribute{}
+
+	// Add the subject if necessary
+	if deltaTemplate.Subject.String() != "" && deltaTemplate.Subject.String() != baseTemplate.Subject.String() {
+		deltaAttribute.Subject = asn1.RawValue{
+			Class:      2,
+			Tag:        0,
+			IsCompound: true,
+			Bytes:      deltaCsr.RawSubject,
+		}
+	}
 
 	// Add the subject public key information
 	key, ok := deltaPrivKey.(crypto.Signer)
@@ -376,10 +387,10 @@ func parseDeltaExtension(deltaDer []byte) (*deltaCertificateDescriptor, error) {
 	return &deltaExtension, nil
 }
 
-func parseDeltaCertificateRequestAttribute(deltaDer []byte) (*deltaCertificateRequestAttribute, error) {
+func parseDeltaCertificateRequestAttribute(deltaAttributeDer []byte) (*deltaCertificateRequestAttribute, error) {
 	// Attempt to parse the delta extension
 	deltaAttribute := deltaCertificateRequestAttribute{}
-	_, err := asn1.Unmarshal(deltaDer, &deltaAttribute)
+	_, err := asn1.Unmarshal(deltaAttributeDer, &deltaAttribute)
 	if err != nil {
 		return nil, err
 	}

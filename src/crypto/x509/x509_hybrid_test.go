@@ -20,6 +20,7 @@ import (
 	"math/big"
 	"reflect"
 	"testing"
+	"os"
 )
 
 // In order to dump a PEM encoded certificate, use the following instruction:
@@ -399,6 +400,9 @@ func TestChameleonDeltaCSRAttributeSubjectPKInfo(t *testing.T) {
 	for _, tc := range testcases {
 		// Get the base key
 		_, basePrivKey, err := ed25519.GenerateKey(rand.Reader)
+		if err != nil {
+			t.Error(err)
+		}
 
 		// Generate the delta key
 		deltaPrivKey, _ := tc.privKeyGenerator()
@@ -408,32 +412,10 @@ func TestChameleonDeltaCSRAttributeSubjectPKInfo(t *testing.T) {
 		template := CertificateRequest{
 			Subject: pkix.Name{CommonName: "Test CSR"},
 		}
-		csrBytes, err := CreateChameleonCertificateRequest(rand.Reader, &template, &template, deltaPrivKey, basePrivKey)
-		if err != nil {
-			t.Errorf("Error: unexpected error when creating the Delta CSR %v", err)
-		}
 
-		// Parse the CSR
-		csr, err := ParseCertificateRequest(csrBytes)
+		csr, parsedAttribute, err := createChameleonCSRAndParseAttribute(&template, &template, deltaPrivKey, basePrivKey)
 		if err != nil {
-			t.Errorf("Error: unexpected error when parsing the Delta CSR %v", err)
-		}
-
-		// Recover the DeltaCertificateRequest attribute
-		var deltaCsrAttribute pkix.Extension
-		for _, ext := range csr.Extensions {
-			if ext.Id.Equal(deltaCertificateRequestAttributeOid) {
-				deltaCsrAttribute = ext
-			}
-		}
-		if deltaCsrAttribute.Value == nil {
-			t.Errorf("Error: the CSR does not contain a Delta CSR attribute")
-		}
-
-		// Parse the extension
-		parsedAttribute, err := parseDeltaCertificateRequestAttribute(deltaCsrAttribute.Value)
-		if err != nil {
-			t.Errorf("Error: unexpected error when parsing the delta CSR attribute: %v", err)
+			t.Error(err)
 		}
 
 		// Verify the public key information of the base CSR corresponds to the base priv key
@@ -445,6 +427,87 @@ func TestChameleonDeltaCSRAttributeSubjectPKInfo(t *testing.T) {
 		if !parsedAttribute.PublicKeyInfo.Algorithm.Algorithm.Equal(deltaPublicKeyAlgorithm.Algorithm) || !bytes.Equal(parsedAttribute.PublicKeyInfo.PublicKey.Bytes, deltaPubKeyBytes) {
 			t.Errorf("Error: the delta CSR attribute specifies an incorrect public key")
 		}
+	}
+}
+
+func TestChameleonDeltaCSRAttributeSubjectName(t *testing.T) {
+	testcases := []struct {
+		name             string
+		baseSubject      pkix.Name
+		deltaSubject     pkix.Name
+	}{
+		{
+			name: "Same Subject",
+			baseSubject: pkix.Name{CommonName: "Subject A"},
+			deltaSubject: pkix.Name{CommonName: "Subject A"},
+		},
+		{
+			name: "No Delta Subject",
+			baseSubject: pkix.Name{CommonName: "Subject A"},
+		},
+		{
+			name: "Different Subject",
+			baseSubject: pkix.Name{CommonName: "Subject A"},	
+			deltaSubject: pkix.Name{CommonName: "Subject B"},	
+		},
+		{
+			name: "Another Different Subject",
+			baseSubject: pkix.Name{CommonName: "Subject A"},
+			deltaSubject: pkix.Name{CommonName: "Subject C"},
+		},
+	}
+
+	for _, tc := range testcases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Get the base and delta keys
+			_, basePrivKey, err := ed25519.GenerateKey(rand.Reader)
+			if err != nil {
+				t.Error(err)
+			}
+			_, deltaPrivKey, _ := mldsa65.GenerateKey(rand.Reader)
+			if err != nil {
+				t.Error(err)
+			}
+
+			// Create the base and delta templates
+			baseTemplate := CertificateRequest{
+				Subject: tc.baseSubject,
+			}
+
+			deltaTemplate := CertificateRequest{}
+			if tc.deltaSubject.String() != "" {
+				deltaTemplate.Subject = tc.deltaSubject
+			}
+
+			// Generate the CSR and parse the delta extension
+			csr, parsedAttribute, err := createChameleonCSRAndParseAttribute(&deltaTemplate, &baseTemplate, deltaPrivKey, basePrivKey)
+			if err != nil {
+				t.Error(err)
+			}
+
+			// Verify the base subject
+			if csr.Subject.String() != tc.baseSubject.String() {
+				t.Errorf("Error: expected base Subject %v, got %v", tc.baseSubject.String(), csr.Subject.String())
+			}
+
+			// Parse and verify the delta subject
+			if tc.deltaSubject.String() != "" && tc.deltaSubject.String() != tc.baseSubject.String() {
+				var csrDeltaSubject pkix.Name
+				rdnSequence, err := parseName(parsedAttribute.Subject.Bytes)
+				if err != nil {
+					t.Errorf("Error: unexpected error when parsing the Delta Attribute Subject %v", err)	
+				}
+				csrDeltaSubject.FillFromRDNSequence(rdnSequence)
+
+				if csrDeltaSubject.String() != tc.deltaSubject.String() {
+					t.Errorf("Error: expected the delta subject to be %v, got %v", tc.deltaSubject.String(), csrDeltaSubject.String())
+				}
+			} else {
+				if len(parsedAttribute.Subject.Bytes) > 0 {
+					t.Error("Error: expected the delta subject to be empty")
+				}
+			}
+		})
 	}
 }
 
@@ -656,6 +719,39 @@ func parseRelatedCertificateExtension(certificate *Certificate) (*relatedCertifi
 	}
 
 	return &parsedExtension, nil
+}
+
+func createChameleonCSRAndParseAttribute(deltaTemplate, baseTemplate *CertificateRequest, deltaPrivKey, basePrivKey any) (*CertificateRequest, *deltaCertificateRequestAttribute, error) {
+		csrBytes, err := CreateChameleonCertificateRequest(rand.Reader, deltaTemplate, baseTemplate, deltaPrivKey, basePrivKey)
+		if err != nil {
+			return nil, nil, fmt.Errorf("Error: unexpected error when creating the Delta CSR %v", err)
+		}
+		pem.Encode(os.Stdout, &pem.Block{Type: "CERTIFICATE SIGNING REQUEST", Bytes: csrBytes})
+
+		// Parse the CSR
+		csr, err := ParseCertificateRequest(csrBytes)
+		if err != nil {
+			return nil, nil, fmt.Errorf("Error: unexpected error when parsing the Delta CSR %v", err)
+		}
+
+		// Recover the DeltaCertificateRequest attribute
+		var deltaCsrAttribute pkix.Extension
+		for _, ext := range csr.Extensions {
+			if ext.Id.Equal(deltaCertificateRequestAttributeOid) {
+				deltaCsrAttribute = ext
+			}
+		}
+		if deltaCsrAttribute.Value == nil {
+			return nil, nil, fmt.Errorf("Error: the CSR does not contain a Delta CSR attribute")
+		}
+
+		// Parse the extension
+		parsedAttribute, err := parseDeltaCertificateRequestAttribute(deltaCsrAttribute.Value)
+		if err != nil {
+			return nil, nil, fmt.Errorf("Error: unexpected error when parsing the delta CSR attribute: %v", err)
+		}
+
+		return csr, parsedAttribute, nil
 }
 
 ////////////////////////////////////////////////////////////////////////////////
