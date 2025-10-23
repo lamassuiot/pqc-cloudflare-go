@@ -36,7 +36,7 @@ type deltaCertificateDescriptor struct {
 	Validity           validity                 `asn1:"optional,explicit,tag:2"`
 	Subject            asn1.RawValue            `asn1:"optional,explicit,tag:3"`
 	PublicKey          publicKeyInfo
-	Extensions         []pkix.Extension `asn1:"omitempty,optional,explicit,tag:4"`
+	Extensions         []pkix.Extension `asn1:"optional,explicit,tag:4"`
 	SignatureValue     asn1.BitString
 }
 
@@ -48,6 +48,7 @@ type relatedCertificateExtension struct {
 type deltaCertificateRequestAttribute struct {
 	Subject       asn1.RawValue `asn1:"optional,explicit,tag:0"`
 	PublicKeyInfo publicKeyInfo
+	Extensions    []pkix.Extension `asn1:"optional,explicit,tag:1"`
 }
 
 // CreateChameleonCertificate creates a new x509 chameleon certificate as per
@@ -119,17 +120,14 @@ func CreateChameleonCertificate(randSource io.Reader, deltaTemplate, baseTemplat
 
 	// For efficiency's sake, convert the base template extensions into a map to avoid O(n*m)
 	// complexity in the for loop
-	baseExtensions := make(map[string]pkix.Extension)
-	for _, ext := range baseTemplate.Extensions {
-		baseExtensions[ext.Id.String()] = ext
-	}
+	baseExtensionIndexes := buildExtensionIndexMap(baseTemplate.Extensions)
 
 	// Copy the necessary extensions and avoid duplication as per the draft's indications
 	// 	- Subject Key Identifier MUST be copied
 	//  - Extensions with different value must be copied
 	for _, ext := range deltaCert.Extensions {
-		baseExt, ok := baseExtensions[ext.Id.String()]
-		appendExtension := ext.Id.Equal(oidExtensionSubjectKeyId) || ok && !bytes.Equal(ext.Value, baseExt.Value)
+		baseExtIndex, ok := baseExtensionIndexes[ext.Id.String()]
+		appendExtension := ext.Id.Equal(oidExtensionSubjectKeyId) || ok && !bytes.Equal(ext.Value, baseTemplate.Extensions[baseExtIndex].Value)
 
 		if appendExtension {
 			deltaExt.Extensions = append(deltaExt.Extensions, ext)
@@ -165,10 +163,7 @@ func CreateChameleonCertificate(randSource io.Reader, deltaTemplate, baseTemplat
 
 func ReconstructDeltaCertificate(base *Certificate) (*Certificate, error) {
 	// Build a map with all base certificate extensions and their index
-	baseExtensions := make(map[string]int)
-	for index, ext := range base.Extensions {
-		baseExtensions[ext.Id.String()] = index
-	}
+	baseExtensions := buildExtensionIndexMap(base.Extensions)
 
 	// Check if the base certificate contains a DCD extension
 	dcdIndex, ok := baseExtensions[deltaExtensionOid.String()]
@@ -293,6 +288,17 @@ func CreateChameleonCertificateRequest(rand io.Reader, deltaTemplate, baseTempla
 			Bytes:     pubKeyBytes,
 			BitLength: len(pubKeyBytes) * 8,
 		},
+	}
+
+	// If necessary, add differing extensions
+	baseExtensions := buildExtensionIndexMap(baseTemplate.Extensions)
+	for _, ext := range deltaTemplate.Extensions {
+		index, _ := baseExtensions[ext.Id.String()]
+
+		// TODO add test case for extension present in delta and not in base -> this should fail
+		if !bytes.Equal(baseTemplate.Extensions[index].Value, ext.Value) {
+			deltaAttribute.Extensions = append(deltaAttribute.Extensions, ext)
+		}
 	}
 
 	// Add the attribute to the base CSR template
@@ -444,4 +450,14 @@ func (c *Certificate) deriveRawCertificate() error {
 	} else {
 		return nil
 	}
+}
+
+func buildExtensionIndexMap(extensions []pkix.Extension) map[string]int {
+	extensionMap := make(map[string]int)
+
+	for index, ext := range extensions {
+		extensionMap[ext.Id.String()] = index
+	}
+
+	return extensionMap
 }
