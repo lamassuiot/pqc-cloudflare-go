@@ -46,9 +46,10 @@ type relatedCertificateExtension struct {
 }
 
 type deltaCertificateRequestAttribute struct {
-	Subject       asn1.RawValue `asn1:"optional,explicit,tag:0"`
-	PublicKeyInfo publicKeyInfo
-	Extensions    []pkix.Extension `asn1:"optional,explicit,tag:1"`
+	Subject            asn1.RawValue `asn1:"optional,explicit,tag:0"`
+	PublicKeyInfo      publicKeyInfo
+	Extensions         []pkix.Extension         `asn1:"optional,explicit,tag:1"`
+	SignatureAlgorithm pkix.AlgorithmIdentifier `asn1:"optional,explicit,tag:2"`
 }
 
 // CreateChameleonCertificate creates a new x509 chameleon certificate as per
@@ -301,6 +302,13 @@ func CreateChameleonCertificateRequest(rand io.Reader, deltaTemplate, baseTempla
 		}
 	}
 
+	// Add the signature algorithm information
+	_, sigAlgo, err := signingParamsForPublicKey(key.Public(), deltaTemplate.SignatureAlgorithm)
+	if err != nil {
+		return nil, err
+	}
+	deltaAttribute.SignatureAlgorithm = sigAlgo
+
 	// Add the attribute to the base CSR template
 	rawDeltaAttribute, err := asn1.MarshalWithParams(deltaAttribute, `asn1:"optional"`)
 	if err != nil {
@@ -329,7 +337,7 @@ func CreateBoundCertificate(randSource io.Reader, template, parent *Certificate,
 		return nil, err
 	}
 
-	// Compute the hash value of the relate cert
+	// Compute the hash value of the related cert
 	hashValue, err := computeRelatedCertHash(signatureAlgorithm.Algorithm, relatedCert)
 	if err != nil {
 		return nil, err

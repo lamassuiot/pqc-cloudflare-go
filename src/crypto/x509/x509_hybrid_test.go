@@ -416,6 +416,7 @@ func TestChameleonDeltaCSRAttributeSubjectPKInfo(t *testing.T) {
 		if err != nil {
 			t.Error(err)
 		}
+		pem.Encode(os.Stdout, &pem.Block{Type: "CERTIFICATE SIGNING REQUEST", Bytes: csr.Raw})
 
 		// Verify the public key information of the base CSR corresponds to the base priv key
 		if !reflect.DeepEqual(csr.PublicKey, basePrivKey.Public()) {
@@ -611,6 +612,69 @@ func TestChameleonDeltaCSRAttributeExtensions(t *testing.T) {
 				}
 			} else if len(parsedAttribute.Subject.Bytes) > 0 {
 				t.Error("Error: expected the delta subject to be empty")
+			}
+		})
+	}
+}
+
+func TestChameleonDeltaCSRAttributeSignatureAlgorithm(t *testing.T) {
+	testcases := []struct {
+		name     string
+		deltaKey func() (crypto.Signer, error)
+	}{
+		{
+			name: "RSA",
+			deltaKey: func() (crypto.Signer, error) {
+				return rsa.GenerateKey(rand.Reader, 4096)
+			},
+		},
+		{
+			name: "Ed25519",
+			deltaKey: func() (crypto.Signer, error) {
+				_, key, err := ed25519.GenerateKey(rand.Reader)
+				return key, err
+			},
+		},
+		{
+			name: "MLDSA",
+			deltaKey: func() (crypto.Signer, error) {
+				_, key, err := mldsa65.GenerateKey(rand.Reader)
+				return key, err
+			},
+		},
+	}
+
+	for _, tc := range testcases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Get the base key
+			_, baseKey, err := ed25519.GenerateKey(rand.Reader)
+			if err != nil {
+				t.Error(err)
+			}
+			deltaKey, err := tc.deltaKey()
+			if err != nil {
+				t.Error(err)
+			}
+
+			// Create the base and delta templates
+			template := CertificateRequest{
+				Subject: pkix.Name{CommonName: "Test CA"},
+			}
+
+			// Generate the CSR and parse the delta extension
+			_, parsedAttribute, err := createChameleonCSRAndParseAttribute(&template, &template, deltaKey, baseKey)
+			if err != nil {
+				t.Error(err)
+			}
+
+			// Verify the Signature Algorithm parameter
+			_, sigAlgo, err := signingParamsForPublicKey(deltaKey.Public(), template.SignatureAlgorithm)
+			if err != nil {
+				t.Errorf("Error: unexpected error ocurred: %v", err)
+			}
+
+			if !parsedAttribute.SignatureAlgorithm.Algorithm.Equal(sigAlgo.Algorithm) {
+				t.Errorf("Error: expected %v signature algorithm, got %v", parsedAttribute.SignatureAlgorithm.Algorithm, sigAlgo.Algorithm)
 			}
 		})
 	}
