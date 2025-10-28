@@ -320,8 +320,92 @@ func CreateChameleonCertificateRequest(rand io.Reader, deltaTemplate, baseTempla
 		Value: rawDeltaAttribute,
 	})
 
-	// Build the Base CSR
+	// Compute the tbsCertificateRaw for the CSR in its current form
+	csrBytes, err := CreateCertificateRequest(rand, baseTemplate, basePrivKey)
+	if err != nil {
+		return nil, err
+	}
+	csr, err := ParseCertificateRequest(csrBytes)
+	if err != nil {
+		return nil, err
+	}
+
+	// Get the signing params
+	hashFunc, sigAlgo, err := signingParamsForPublicKey(key.Public(), deltaTemplate.SignatureAlgorithm)
+	if err != nil {
+		return nil, err
+	}
+
+	// If necessary pre-hash the certificate request info
+	bytesToSign := csr.RawTBSCertificateRequest
+	if hashFunc != 0 {
+		h := hashFunc.New()
+		h.Write(bytesToSign)
+		bytesToSign = h.Sum(nil)
+	}
+
+	// Compute the signature
+	signature, err := key.Sign(rand, bytesToSign, hashFunc)
+	if err != nil {
+		return nil, err
+	}
+
+	signatureValue := asn1.BitString{
+		Bytes:     signature,
+		BitLength: len(csr.Signature) * 8,
+	}
+	rawSignature, err := asn1.Marshal(signatureValue)
+	if err != nil {
+		return nil, err
+	}
+
+	baseTemplate.ExtraExtensions = append(baseTemplate.ExtraExtensions, pkix.Extension{
+		Id:    deltaCertificateRequestSignatureAttributeOid,
+		Value: rawSignature,
+	})
+
+	// Build the final CSR
 	return CreateCertificateRequest(rand, baseTemplate, basePrivKey)
+}
+
+func ParseChameleonCertificateRequest(base []byte) (*CertificateRequest, *CertificateRequest, error) {
+	// Parse the CSR
+	baseCsr, err := ParseCertificateRequest(base)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	extensionMap := buildExtensionIndexMap(baseCsr.Extensions)
+
+	// Extract the delta attribute
+	attributeIndex, ok := extensionMap[deltaCertificateRequestAttributeOid.String()]
+	if !ok {
+		return nil, nil, errors.New("Error: delta CSR does not contain a delta certificate request attribute")
+	}
+
+	parsedAttribute, err := parseDeltaCertificateRequestAttribute(baseCsr.Extensions[attributeIndex].Value)
+	if err != nil {
+		return nil, nil, errors.New("Error parsing the delta CSR attribute")
+	}
+
+	// Extract the delta signature attribute
+	attributeIndex, ok = extensionMap[deltaCertificateRequestSignatureAttributeOid.String()]
+	if !ok {
+		return nil, nil, errors.New("Error: delta CSR does not contain a delta certificate request attribute")
+	}
+
+	var deltaSignature asn1.BitString
+	_, err = asn1.Unmarshal(baseCsr.Extensions[attributeIndex].Value, &deltaSignature)
+	if err != nil {
+		return nil, nil, errors.New("Error parsing the delta CSR attribute")
+	}
+
+	deltaCsr, err := deriveDeltaCSR(baseCsr, parsedAttribute, deltaSignature)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return deltaCsr, baseCsr, nil
 }
 
 func CreateBoundCertificate(randSource io.Reader, template, parent *Certificate, relatedCertDer []byte, pubKey, privKey any) ([]byte, error) {
@@ -458,6 +542,54 @@ func (c *Certificate) deriveRawCertificate() error {
 	} else {
 		return nil
 	}
+}
+
+func deriveDeltaCSR(baseCsr *CertificateRequest, parsedAttribute *deltaCertificateRequestAttribute, signature asn1.BitString) (*CertificateRequest, error) {
+	// Create the raw TBS structure
+	deltaTBSCertificateRequest := tbsCertificateRequest{}
+
+	// Modify the necessary fields
+	if len(parsedAttribute.Subject.Bytes) > 0 {
+		deltaTBSCertificateRequest.Subject = asn1.RawValue{FullBytes: parsedAttribute.Subject.Bytes}
+	} else {
+		deltaTBSCertificateRequest.Subject = asn1.RawValue{FullBytes: baseCsr.RawSubject}
+	}
+
+	deltaTBSCertificateRequest.PublicKey = parsedAttribute.PublicKeyInfo
+
+	var extensions []pkix.Extension
+	deltaExtensions := buildExtensionIndexMap(parsedAttribute.Extensions)
+	for _, ext := range baseCsr.Extensions {
+		_, ok := deltaExtensions[ext.Id.String()]
+
+		if ok {
+			extensions = append(extensions, parsedAttribute.Extensions[deltaExtensions[ext.Id.String()]])
+		} else {
+			extensions = append(extensions, ext)
+		}
+	}
+
+	deltaTBSCertificateRequest.Raw = nil
+	rawDeltaTBSCertificateRequest, err := asn1.Marshal(deltaTBSCertificateRequest)
+	if err != nil {
+		return nil, err
+	}
+	deltaTBSCertificateRequest.Raw = rawDeltaTBSCertificateRequest
+
+	deltaCSR := certificateRequest{
+		TBSCSR:             deltaTBSCertificateRequest,
+		SignatureAlgorithm: parsedAttribute.SignatureAlgorithm,
+		SignatureValue:     signature,
+	}
+
+	// Encode the CSR
+	deltaCSRDer, err := asn1.Marshal(deltaCSR)
+	if err != nil {
+		return nil, err
+	}
+
+	// Parse the CSR and return the object
+	return ParseCertificateRequest(deltaCSRDer)
 }
 
 func buildExtensionIndexMap(extensions []pkix.Extension) map[string]int {

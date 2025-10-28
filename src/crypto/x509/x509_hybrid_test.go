@@ -508,6 +508,75 @@ func TestChameleonDeltaCSRAttributeSubjectName(t *testing.T) {
 	}
 }
 
+func TestChameleonDeltaCSRSignatureAttribute(t *testing.T) {
+	testcases := []struct {
+		name    string
+		subject pkix.Name
+	}{
+		{
+			name:    "Subject A",
+			subject: pkix.Name{CommonName: "Subject A"},
+		},
+		{
+			name:    "Subject B",
+			subject: pkix.Name{CommonName: "Subject B"},
+		},
+	}
+
+	for _, tc := range testcases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, basePrivKey, err := ed25519.GenerateKey(rand.Reader)
+			if err != nil {
+				t.Error(err)
+			}
+			deltaPubKey, deltaPrivKey, _ := mldsa65.GenerateKey(rand.Reader)
+			if err != nil {
+				t.Error(err)
+			}
+
+			template := CertificateRequest{
+				Subject: tc.subject,
+			}
+
+			csr, signature, err := createChameleonCSRAndExtractSignature(&template, &template, deltaPrivKey, basePrivKey)
+			if err != nil {
+				t.Error(err)
+			}
+
+			// Remove the delta CSR signature attribute from the csr
+			var index int
+			found := false
+			for i := 0; i < len(csr.Extensions) && !found; i++ {
+				if csr.Extensions[i].Id.Equal(deltaCertificateRequestSignatureAttributeOid) {
+					index = i
+					found = true
+				}
+			}
+
+			// Get the raw bytes for the cleaned CSR
+			csr.Attributes = nil
+			csr.ExtraExtensions = append(csr.Extensions[0:index], csr.Extensions[index+1:]...)
+			if err != nil {
+				t.Error(err)
+			}
+			innerCsrDer, err := CreateCertificateRequest(rand.Reader, csr, basePrivKey)
+			if err != nil {
+				t.Error(err)
+			}
+			innerCsr, err := ParseCertificateRequest(innerCsrDer)
+			if err != nil {
+				t.Error(err)
+			}
+
+			// Check the signature
+			valid := mldsa65.Verify(deltaPubKey, innerCsr.RawTBSCertificateRequest, nil, signature)
+			if !valid {
+				t.Error("Error: invalid delta request signature attribute value")
+			}
+		})
+	}
+}
+
 func TestChameleonDeltaCSRAttributeExtensions(t *testing.T) {
 	testcases := []struct {
 		name            string
@@ -674,6 +743,88 @@ func TestChameleonDeltaCSRAttributeSignatureAlgorithm(t *testing.T) {
 
 			if !parsedAttribute.SignatureAlgorithm.Algorithm.Equal(sigAlgo.Algorithm) {
 				t.Errorf("Error: expected %v signature algorithm, got %v", parsedAttribute.SignatureAlgorithm.Algorithm, sigAlgo.Algorithm)
+			}
+		})
+	}
+}
+
+func TestParseChameleonCertificateRequest(t *testing.T) {
+
+	testcases := []struct {
+		name              string
+		deltaTemplate     *CertificateRequest
+		baseTemplate      *CertificateRequest
+		deltaKeyGenerator func() (crypto.Signer, error)
+		baseKeyGenerator  func() (crypto.Signer, error)
+	}{
+		{
+			name: "RSA-MLDSA",
+			deltaTemplate: &CertificateRequest{
+				Subject: pkix.Name{CommonName: "Test Delta Subject"},
+			},
+			baseTemplate: &CertificateRequest{
+				Subject: pkix.Name{CommonName: "Test Base Subject"},
+			},
+			deltaKeyGenerator: func() (crypto.Signer, error) {
+				_, key, err := mldsa65.GenerateKey(rand.Reader)
+				return key, err
+			},
+			baseKeyGenerator: func() (crypto.Signer, error) {
+				return rsa.GenerateKey(rand.Reader, 4096)
+			},
+		},
+	}
+
+	checkOk := func(name string, subject string, publicKeyInfo []byte, extensions []pkix.Extension, signatureAlgorithm SignatureAlgorithm, csr *CertificateRequest) error {
+		if subject != csr.Subject.String() {
+			return fmt.Errorf("Error parsing %s: expected subject %v, got %v", name, subject, csr.Subject.String())
+		}
+
+		if !bytes.Equal(publicKeyInfo, csr.RawSubjectPublicKeyInfo) {
+			return fmt.Errorf("Error parsing %s: incorrect subject public key info", name)
+		}
+
+		if !reflect.DeepEqual(extensions, csr.Extensions) {
+			return fmt.Errorf("Error parsing %s: extensions don't match", name)
+		}
+
+		if signatureAlgorithm != csr.SignatureAlgorithm {
+			return fmt.Errorf("Error parsing %s: expected %v signature algorithm, got %v", name, signatureAlgorithm, csr.SignatureAlgorithm)
+		}
+
+		return nil
+	}
+
+	for _, tc := range testcases {
+		t.Run(tc.name, func(t *testing.T) {
+			deltaKey, err := tc.deltaKeyGenerator()
+			if err != nil {
+				t.Errorf("Error: unexpected error %v", err)
+			}
+
+			baseKey, err := tc.baseKeyGenerator()
+			if err != nil {
+				t.Errorf("Error: unexpected error %v", err)
+			}
+
+			csr, parsedAttribute, err := createChameleonCSRAndParseAttribute(tc.deltaTemplate, tc.baseTemplate, deltaKey, baseKey)
+			if err != nil {
+				t.Errorf("Error: unexpected error generating the Delta CSR %v", err)
+			}
+
+			deltaCsr, baseCsr, err := ParseChameleonCertificateRequest(csr.Raw)
+			if err != nil {
+				t.Errorf("Error: unexpected error occurred when parsing the Delta CSR %v", err)
+			}
+
+			err = checkOk("Delta CSR", tc.deltaTemplate.Subject.String(), parsedAttribute.PublicKeyInfo.Raw, parsedAttribute.Extensions, getSignatureAlgorithmFromAI(parsedAttribute.SignatureAlgorithm), deltaCsr)
+			if err != nil {
+				t.Error(err)
+			}
+
+			err = checkOk("Base CSR", tc.baseTemplate.Subject.String(), csr.RawSubjectPublicKeyInfo, csr.Extensions, csr.SignatureAlgorithm, baseCsr)
+			if err != nil {
+				t.Error(err)
 			}
 		})
 	}
@@ -919,6 +1070,38 @@ func createChameleonCSRAndParseAttribute(deltaTemplate, baseTemplate *Certificat
 	}
 
 	return csr, parsedAttribute, nil
+}
+
+func createChameleonCSRAndExtractSignature(deltaTemplate, baseTemplate *CertificateRequest, deltaPrivKey, basePrivKey any) (*CertificateRequest, []byte, error) {
+	csrBytes, err := CreateChameleonCertificateRequest(rand.Reader, deltaTemplate, baseTemplate, deltaPrivKey, basePrivKey)
+	if err != nil {
+		return nil, nil, fmt.Errorf("Error: unexpected error when creating the Delta CSR %v", err)
+	}
+
+	// Parse the CSR
+	csr, err := ParseCertificateRequest(csrBytes)
+	if err != nil {
+		return nil, nil, fmt.Errorf("Error: unexpected error when parsing the Delta CSR %v", err)
+	}
+
+	// Recover the Delta Signature Attribute
+	var deltaSignatureAttribute pkix.Extension
+	for _, ext := range csr.Extensions {
+		if ext.Id.Equal(deltaCertificateRequestSignatureAttributeOid) {
+			deltaSignatureAttribute = ext
+		}
+	}
+	if deltaSignatureAttribute.Value == nil {
+		return nil, nil, fmt.Errorf("Error: the CSR does not contain a Delta Signature attribute")
+	}
+
+	var signature asn1.BitString
+	_, err = asn1.Unmarshal(deltaSignatureAttribute.Value, &signature)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return csr, signature.RightAlign(), nil
 }
 
 ////////////////////////////////////////////////////////////////////////////////
