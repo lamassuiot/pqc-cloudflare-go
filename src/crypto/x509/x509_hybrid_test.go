@@ -792,6 +792,17 @@ func TestParseChameleonCertificateRequest(t *testing.T) {
 			return fmt.Errorf("Error parsing %s: expected %v signature algorithm, got %v", name, signatureAlgorithm, csr.SignatureAlgorithm)
 		}
 
+		extensionMap := buildExtensionIndexMap(csr.Extensions)
+		_, isPresent := extensionMap[deltaCertificateRequestAttributeOid.String()]
+		if isPresent {
+			return fmt.Errorf("Error parsing %s: resulting CSR contains the Delta Attribute", name)
+		}
+
+		_, isPresent = extensionMap[deltaCertificateRequestSignatureAttributeOid.String()]
+		if isPresent {
+			return fmt.Errorf("Error parsing %s: resulting CSR contains the Delta Attribute Signature", name)
+		}
+
 		return nil
 	}
 
@@ -822,6 +833,23 @@ func TestParseChameleonCertificateRequest(t *testing.T) {
 				t.Error(err)
 			}
 
+			// Remove the extensions that should not be present in the final CSR
+			var deltaAttIdx int
+			for i, ext := range csr.Extensions {
+				if ext.Id.Equal(deltaCertificateRequestAttributeOid) {
+					deltaAttIdx = i
+				}
+			}
+			csr.Extensions = append(csr.Extensions[:deltaAttIdx], csr.Extensions[deltaAttIdx + 1:]...)
+
+			var deltaSigIdx int
+			for i, ext := range csr.Extensions {
+				if ext.Id.Equal(deltaCertificateRequestSignatureAttributeOid) {
+					deltaSigIdx = i
+				}
+			}
+			csr.Extensions = append(csr.Extensions[:deltaSigIdx], csr.Extensions[deltaSigIdx + 1:]...)
+				
 			err = checkOk("Base CSR", tc.baseTemplate.Subject.String(), csr.RawSubjectPublicKeyInfo, csr.Extensions, csr.SignatureAlgorithm, baseCsr)
 			if err != nil {
 				t.Error(err)

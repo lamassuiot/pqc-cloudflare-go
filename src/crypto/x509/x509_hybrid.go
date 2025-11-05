@@ -9,10 +9,10 @@ import (
 	"crypto/sha512"
 	"crypto/x509/pkix"
 	"encoding/asn1"
-	"errors"
 	"hash"
 	"io"
 	"math/big"
+	"fmt"
 )
 
 // Current proposed OID for the delta extension in a "Chameleon" certificate, as defined
@@ -59,7 +59,7 @@ func CreateChameleonCertificate(randSource io.Reader, deltaTemplate, baseTemplat
 	serialNumberLimit := new(big.Int).Lsh(big.NewInt(1), 128)
 	deltaSerialNumber, err := rand.Int(randSource, serialNumberLimit)
 	if err != nil {
-		return nil, errors.New("x509: could not generate delta certificate serial number")
+		return nil, fmt.Errorf("x509: could not generate delta certificate serial number")
 	}
 	deltaTemplate.SerialNumber = deltaSerialNumber
 
@@ -154,7 +154,7 @@ func CreateChameleonCertificate(randSource io.Reader, deltaTemplate, baseTemplat
 	// Change the serial number to generate the base/outer certificate
 	baseSerialNumber, err := rand.Int(randSource, serialNumberLimit)
 	if err != nil {
-		return nil, errors.New("x509: could not generate base certificate serial number")
+		return nil, fmt.Errorf("x509: could not generate base certificate serial number")
 	}
 	baseTemplate.SerialNumber = baseSerialNumber
 
@@ -169,13 +169,13 @@ func ReconstructDeltaCertificate(base *Certificate) (*Certificate, error) {
 	// Check if the base certificate contains a DCD extension
 	dcdIndex, ok := baseExtensions[deltaExtensionOid.String()]
 	if !ok {
-		return nil, errors.New("Error: the certificate does not contain a Delta Certificate Descriptor extension")
+		return nil, fmt.Errorf("Error: the certificate does not contain a Delta Certificate Descriptor extension")
 	}
 
 	// Parse the Delta Certificate Descriptor extension
 	dcd, err := parseDeltaExtension(base.Extensions[dcdIndex].Value)
 	if err != nil {
-		//return nil, errors.New("Error parsing the Delta Certificate Descriptor")
+		//return nil, fmt.Errorf("Error parsing the Delta Certificate Descriptor")
 		return nil, err
 	}
 
@@ -230,7 +230,7 @@ func ReconstructDeltaCertificate(base *Certificate) (*Certificate, error) {
 		// If the extension does not exist in the base certificate, return an error
 		index, ok := baseExtensions[ext.Id.String()]
 		if !ok {
-			return nil, errors.New("Error: The deltaCertificateExtension contains extensions not present in the base certificate")
+			return nil, fmt.Errorf("Error: The deltaCertificateExtension contains extensions not present in the base certificate")
 		}
 
 		// Update the extension in the template
@@ -279,7 +279,7 @@ func CreateChameleonCertificateRequest(rand io.Reader, deltaTemplate, baseTempla
 	// Add the subject public key information
 	key, ok := deltaPrivKey.(crypto.Signer)
 	if !ok {
-		return nil, errors.New("Error: invalid delta private key")
+		return nil, fmt.Errorf("Error: invalid delta private key")
 	}
 	pubKeyBytes, pubKeyAlgorithm, err := marshalPublicKey(key.Public())
 	deltaAttribute.PublicKeyInfo = publicKeyInfo{
@@ -377,28 +377,32 @@ func ParseChameleonCertificateRequest(base []byte) (*CertificateRequest, *Certif
 
 	extensionMap := buildExtensionIndexMap(baseCsr.Extensions)
 
-	// Extract the delta attribute
-	attributeIndex, ok := extensionMap[deltaCertificateRequestAttributeOid.String()]
+	// Extract and the delta attribute and remove it from the csr
+	deltaAttributeIndex, ok := extensionMap[deltaCertificateRequestAttributeOid.String()]
 	if !ok {
-		return nil, nil, errors.New("Error: delta CSR does not contain a delta certificate request attribute")
+		return nil, nil, fmt.Errorf("Error: delta CSR does not contain a delta certificate request attribute")
 	}
 
-	parsedAttribute, err := parseDeltaCertificateRequestAttribute(baseCsr.Extensions[attributeIndex].Value)
+	parsedAttribute, err := parseDeltaCertificateRequestAttribute(baseCsr.Extensions[deltaAttributeIndex].Value)
 	if err != nil {
-		return nil, nil, errors.New("Error parsing the delta CSR attribute")
+		return nil, nil, fmt.Errorf("Error parsing the delta CSR attribute")
 	}
 
 	// Extract the delta signature attribute
-	attributeIndex, ok = extensionMap[deltaCertificateRequestSignatureAttributeOid.String()]
+	deltaSignatureIndex, ok := extensionMap[deltaCertificateRequestSignatureAttributeOid.String()]
 	if !ok {
-		return nil, nil, errors.New("Error: delta CSR does not contain a delta certificate request attribute")
+		return nil, nil, fmt.Errorf("Error: delta CSR does not contain a delta certificate request attribute")
 	}
 
 	var deltaSignature asn1.BitString
-	_, err = asn1.Unmarshal(baseCsr.Extensions[attributeIndex].Value, &deltaSignature)
+	_, err = asn1.Unmarshal(baseCsr.Extensions[deltaSignatureIndex].Value, &deltaSignature)
 	if err != nil {
-		return nil, nil, errors.New("Error parsing the delta CSR attribute")
+		return nil, nil, fmt.Errorf("Error parsing the delta CSR attribute")
 	}
+
+	// Remove the delta related attributes from the resulting base CSR
+	baseCsr.Extensions, _ = removeExtension(baseCsr.Extensions, deltaCertificateRequestAttributeOid)
+	baseCsr.Extensions, _ = removeExtension(baseCsr.Extensions, deltaCertificateRequestSignatureAttributeOid)
 
 	deltaCsr, err := deriveDeltaCSR(baseCsr, parsedAttribute, deltaSignature)
 	if err != nil {
@@ -600,4 +604,21 @@ func buildExtensionIndexMap(extensions []pkix.Extension) map[string]int {
 	}
 
 	return extensionMap
+}
+
+func removeExtension(extensions []pkix.Extension, oid asn1.ObjectIdentifier) ([]pkix.Extension, error) {
+	var index int
+
+	found := false
+	for i := 0; i < len(extensions) && !found; i++ {
+		if extensions[i].Id.Equal(oid) {
+			index = i
+			found = true
+		}
+	}
+
+	if !found {
+		return nil, fmt.Errorf("Error: extension %v not present", oid)
+	}
+	return append(extensions[:index], extensions[index + 1:]...), nil
 }
