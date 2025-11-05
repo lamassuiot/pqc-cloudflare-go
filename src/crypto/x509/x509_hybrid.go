@@ -557,6 +557,18 @@ func deriveDeltaCSR(baseCsr *CertificateRequest, parsedAttribute *deltaCertifica
 
 	deltaTBSCertificateRequest.PublicKey = parsedAttribute.PublicKeyInfo
 
+	// Check if the parsed attribute contains extensions not present in the base
+	baseExtensions := buildExtensionIndexMap(baseCsr.Extensions)
+	for _, ext := range parsedAttribute.Extensions {
+		_, ok := baseExtensions[ext.Id.String()]
+
+		if !ok {
+			return nil, fmt.Errorf("Error: the Delta CSR Attribute contains extensions not present in the Base CSR")
+		}
+	}
+
+
+	// Modify or copy the baseCsr extensions
 	var extensions []pkix.Extension
 	deltaExtensions := buildExtensionIndexMap(parsedAttribute.Extensions)
 	for _, ext := range baseCsr.Extensions {
@@ -601,21 +613,3 @@ func buildExtensionIndexMap(extensions []pkix.Extension) map[string]int {
 
 	return extensionMap
 }
-
-func removeExtension(extensions []pkix.Extension, oid asn1.ObjectIdentifier) ([]pkix.Extension, error) {
-	var index int
-
-	found := false
-	for i := 0; i < len(extensions) && !found; i++ {
-		if extensions[i].Id.Equal(oid) {
-			index = i
-			found = true
-		}
-	}
-
-	if !found {
-		return nil, fmt.Errorf("Error: extension %v not present", oid)
-	}
-	return append(extensions[:index], extensions[index + 1:]...), nil
-}
-

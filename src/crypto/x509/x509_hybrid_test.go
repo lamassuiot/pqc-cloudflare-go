@@ -758,7 +758,7 @@ func TestParseChameleonCertificateRequest(t *testing.T) {
 		baseKeyGenerator  func() (crypto.Signer, error)
 	}{
 		{
-			name: "RSA-MLDSA",
+			name: "OK/RSA-MLDSA",
 			deltaTemplate: &CertificateRequest{
 				Subject: pkix.Name{CommonName: "Test Delta Subject"},
 			},
@@ -840,6 +840,64 @@ func TestParseChameleonCertificateRequest(t *testing.T) {
 				t.Error(err)
 			}
 		})
+	}
+}
+
+func TestParseChameleonCertificateRequestWithExtraExtensions(t *testing.T) {
+	deltaTemplate := CertificateRequest{
+		Subject: pkix.Name{CommonName: "Test Delta Subject"},
+	}
+	baseTemplate := CertificateRequest{
+		Subject: pkix.Name{CommonName: "Test Base Subject"},
+	}
+	_, deltaKey, err := mldsa65.GenerateKey(rand.Reader)
+	baseKey, err := rsa.GenerateKey(rand.Reader, 4096)
+
+	
+	csr, parsedAttribute, err := createChameleonCSRAndParseAttribute(&deltaTemplate, &baseTemplate, deltaKey, baseKey)
+	if err != nil {
+		t.Error("Unexpected error occured when creating the Delta CSR")
+	}
+
+	parsedAttribute.Extensions = append(parsedAttribute.Extensions, pkix.Extension{
+		Id: oidExtensionSubjectAltName,
+		Value: []byte{0xde, 0xad, 0xbe, 0xef},
+	})
+
+	var index int
+	for i, ext := range csr.Extensions {
+		if ext.Id.Equal(deltaCertificateRequestAttributeOid) {
+			index = i
+		}
+	}
+
+	rawValue, err := asn1.Marshal(*parsedAttribute)
+	if err != nil {
+		fmt.Println(err)
+		t.Error("Unexpected error occured when marshalling the modified attribute")
+	}
+
+	csr.Extensions[index] = pkix.Extension{
+		Id: deltaCertificateRequestAttributeOid,
+		Value: rawValue,
+	}
+
+	// Force the extension modification to take effect
+	csr.ExtraExtensions = csr.Extensions
+	csr.Extensions = nil
+	csr.Attributes = nil
+
+	// Rebuild the CSR (Note: the signature will change. However, it does not matter for this test)
+	csr.Raw = nil
+	csr.RawTBSCertificateRequest = nil
+	rawCsr, err := CreateCertificateRequest(rand.Reader, csr, baseKey)
+	if err != nil {
+		t.Error("Unexpected error rebuilding the base CSR")
+	}
+
+	_, _, err = ParseChameleonCertificateRequest(rawCsr)
+	if err == nil {
+		t.Error("Error: an error should have been raised when parsing a Delta CSR Attribute with extra extensions")
 	}
 }
 
