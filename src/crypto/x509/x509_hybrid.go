@@ -377,7 +377,7 @@ func ParseChameleonCertificateRequest(base []byte) (*CertificateRequest, *Certif
 
 	extensionMap := buildExtensionIndexMap(baseCsr.Extensions)
 
-	// Extract and the delta attribute and remove it from the csr
+	// Extract and the delta attribute
 	deltaAttributeIndex, ok := extensionMap[deltaCertificateRequestAttributeOid.String()]
 	if !ok {
 		return nil, nil, fmt.Errorf("Error: delta CSR does not contain a delta certificate request attribute")
@@ -399,10 +399,6 @@ func ParseChameleonCertificateRequest(base []byte) (*CertificateRequest, *Certif
 	if err != nil {
 		return nil, nil, fmt.Errorf("Error parsing the delta CSR attribute")
 	}
-
-	// Remove the delta related attributes from the resulting base CSR
-	baseCsr.Extensions, _ = removeExtension(baseCsr.Extensions, deltaCertificateRequestAttributeOid)
-	baseCsr.Extensions, _ = removeExtension(baseCsr.Extensions, deltaCertificateRequestSignatureAttributeOid)
 
 	deltaCsr, err := deriveDeltaCSR(baseCsr, parsedAttribute, deltaSignature)
 	if err != nil {
@@ -622,3 +618,4 @@ func removeExtension(extensions []pkix.Extension, oid asn1.ObjectIdentifier) ([]
 	}
 	return append(extensions[:index], extensions[index + 1:]...), nil
 }
+
