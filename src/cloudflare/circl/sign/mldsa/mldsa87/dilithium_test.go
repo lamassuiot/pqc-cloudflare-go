@@ -23,7 +23,7 @@ var testcases = []struct {
 	check func (crypto.Signer, error)(error)
 }{
 	{
-		name: "Expanded Format RFC 9981",
+		name: "Expanded Format RFC 9881",
 		pem:  expanded_format_rfc,
 		check: checkOk,
 	},
@@ -33,17 +33,17 @@ var testcases = []struct {
 		check: checkOk,
 	},
 	{
-		name: "Seed Format RFC 9981",
+		name: "Seed Format RFC 9881",
 		pem:  seed_format_rfc,
 		check: checkOk,
 	},
 	{
-		name: "Both Format RFC 9981",
+		name: "Both Format RFC 9881",
 		pem:  both_format_rfc,
 		check: checkOk,
 	},
 	{
-		name: "Both Format With Incompatible Keys RFC 9981",
+		name: "Both Format With Incompatible Keys RFC 9881",
 		pem:  both_format_wrong_keys_rfc,
 		check: checkBothFail,
 	},
