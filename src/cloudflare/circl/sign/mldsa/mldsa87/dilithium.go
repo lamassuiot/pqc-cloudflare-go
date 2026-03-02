@@ -188,13 +188,58 @@ func (pk *PublicKey) UnmarshalBinary(data []byte) error {
 
 // Unpacks the private key from data.
 func (sk *PrivateKey) UnmarshalBinary(data []byte) error {
-	if len(data) != PrivateKeySize {
-		return errors.New("packed private key must be of mldsa87.PrivateKeySize bytes")
+	switch len(data) {
+	case PrivateKeySize:
+		var buf [PrivateKeySize]byte
+		copy(buf[:], data)
+		sk.Unpack(&buf)
+		return nil
+	case SeedSize:
+		var seed [SeedSize]byte
+		copy(seed[:], data)
+		_, derivedKey := NewKeyFromSeed(&seed)
+		sk.Unpack((*[PrivateKeySize]byte)(derivedKey.Bytes()))
+		return nil
+	default:
+		if len(data) != (SeedSize + PrivateKeySize + 6) {
+			return errors.New("packed private key must be of mldsa87.PrivateKeySize, mldsa87.KeySize or mldsa87.PrivateKeySize + mldsa87.KeySize + 6 bytes")
+		}
+
+		buf1 := make([]byte, SeedSize + 2)
+		buf2 := make([]byte, PrivateKeySize + 4)
+		copy(buf1, data)
+		copy(buf2, data[SeedSize + 2:])
+
+		// Check if the key is packed in Both format and umarshal it
+		var seed []byte
+		_, err := asn1.Unmarshal(buf1, &seed)
+		if err != nil {
+			return errors.New("error retrieving seed from packed key")
+		}
+
+		var key []byte
+		_, err = asn1.Unmarshal(buf2, &key)
+		if err != nil {
+			return errors.New("error retreiving key value from packed key")
+		}
+
+		// Derive a key using the seed
+		var seedCopy [SeedSize]byte
+		copy(seedCopy[:], seed)
+		_, skFromSeed := NewKeyFromSeed(&seedCopy)
+
+		// Unpack the key
+		var keyCopy [PrivateKeySize]byte
+		copy(keyCopy[:], key)
+		sk.Unpack(&keyCopy)
+
+		// Check if the result in the same key
+		if !sk.Equal(skFromSeed) {
+			return errors.New("error: incompatible seed and key values")
+		}
+
+		return nil
 	}
-	var buf [PrivateKeySize]byte
-	copy(buf[:], data)
-	sk.Unpack(&buf)
-	return nil
 }
 
 // Sign signs the given message.
@@ -338,18 +383,13 @@ func (*scheme) UnmarshalBinaryPublicKey(buf []byte) (sign.PublicKey, error) {
 }
 
 func (*scheme) UnmarshalBinaryPrivateKey(buf []byte) (sign.PrivateKey, error) {
-	if len(buf) != PrivateKeySize {
-		return nil, sign.ErrPrivKeySize
+	var sk PrivateKey
+	err := sk.UnmarshalBinary(buf)
+	if err != nil {
+		return nil, err
 	}
-
-	var (
-		buf2 [PrivateKeySize]byte
-		ret  PrivateKey
-	)
-
-	copy(buf2[:], buf)
-	ret.Unpack(&buf2)
-	return &ret, nil
+	
+	return &sk, nil
 }
 
 func (sk *PrivateKey) Scheme() sign.Scheme {
