@@ -17,45 +17,76 @@ import (
 //                                                                            //
 ////////////////////////////////////////////////////////////////////////////////
 
+var testcases = []struct {
+	name string
+	pem  string
+	check func (crypto.Signer, error)(error)
+}{
+	{
+		name: "Expanded Format RFC 9981",
+		pem:  expanded_format_rfc,
+		check: checkOk,
+	},
+	{
+		name: "Expanded Format Cloudflare Circl",
+		pem:  expanded_format_cf,
+		check: checkOk,
+	},
+	{
+		name: "Seed Format RFC 9981",
+		pem:  seed_format_rfc,
+		check: checkOk,
+	},
+	{
+		name: "Both Format RFC 9981",
+		pem:  both_format_rfc,
+		check: checkOk,
+	},
+	{
+		name: "Both Format With Incompatible Keys RFC 9981",
+		pem:  both_format_wrong_keys_rfc,
+		check: checkBothFail,
+	},
+}
+
 func TestUnmarshal(t *testing.T) {
 	t.Parallel()
 
-	testcases := []struct {
-		name string
-		pem  string
-		check func (*PrivateKey, error)(error)
-	}{
-		{
-			name: "Expanded Format RFC 9981",
-			pem:  expanded_format_rfc,
-			check: checkOk,
-		},
-		{
-			name: "Expanded Format Cloudflare Circl",
-			pem:  expanded_format_cf,
-			check: checkOk,
-		},
-		{
-			name: "Seed Format RFC 9981",
-			pem:  seed_format_rfc,
-			check: checkOk,
-		},
-		{
-			name: "Both Format RFC 9981",
-			pem:  both_format_rfc,
-			check: checkOk,
-		},
-		{
-			name: "Both Format With Incompatible Keys RFC 9981",
-			pem:  both_format_wrong_keys_rfc,
-			check: checkBothFail,
-		},
+	for _, tc := range testcases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Parse the PEM file
+			packedSk, err := unpackKey(tc.pem)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			// Unmarshal the private key
+			var sk PrivateKey
+			err = sk.UnmarshalBinary(packedSk)
+
+			// Run the check function
+			err = tc.check(&sk, err)
+			if err != nil {
+				t.Fatal(err)
+			}
+		})
 	}
+}
+
+func TestUnmarshallFromBinary(t *testing.T) {
+	t.Parallel()
 
 	for _, tc := range testcases {
 		t.Run(tc.name, func(t *testing.T) {
+			// Parse the PEM file
+			packedSk, err := unpackKey(tc.pem)
+			if err != nil {
+				t.Fatal(err)
+			}
+
 			// Unmarshal the private key
-			sk, err := unmarshalKey(tc.pem)
+			scheme := Scheme()
+			sk, err := scheme.UnmarshalBinaryPrivateKey(packedSk)
 
 			// Run the check function
 			err = tc.check(sk, err)
@@ -78,7 +109,7 @@ type pkcs8 struct {
 	PrivateKey []byte
 }
 
-func unmarshalKey(pemKey string) (*PrivateKey, error) {
+func unpackKey(pemKey string) ([]byte, error) {
 	// Parse the PEM string
 	pemData, _ := pem.Decode([]byte(pemKey))
 
@@ -92,18 +123,19 @@ func unmarshalKey(pemKey string) (*PrivateKey, error) {
 	// Obtain the packed private key
 	var packedSk asn1.RawValue
 	_, err = asn1.Unmarshal(privKey.PrivateKey, &packedSk)
-	if err != nil {
-		return nil, err
-	}
+	
+	return packedSk.Bytes, err
+}
 
+func unmarshalKey(packedSk []byte) (*PrivateKey, error) {
 	// Unmarshal the private key
 	var sk PrivateKey
-	err = sk.UnmarshalBinary(packedSk.Bytes)
+	err := sk.UnmarshalBinary(packedSk)
 
 	return &sk, err
 }
 
-func checkOk(sk *PrivateKey, err error) error {
+func checkOk(sk crypto.Signer, err error) error {
 	// Check that the key was unmarshalled without errors
 	if err != nil {
 		return err
@@ -129,7 +161,7 @@ func checkOk(sk *PrivateKey, err error) error {
 	return nil
 }
 
-func checkBothFail(sk *PrivateKey, err error) (error) {
+func checkBothFail(sk crypto.Signer, err error) (error) {
 	// Check that when the seed and expanded keys are not the same, an error is raised
 	if err == nil || err.Error() != "error: incompatible seed and key values" {
 		return fmt.Errorf("Unexpected Error: %s", err)

@@ -390,18 +390,13 @@ func (*scheme) UnmarshalBinaryPublicKey(buf []byte) (sign.PublicKey, error) {
 }
 
 func (*scheme) UnmarshalBinaryPrivateKey(buf []byte) (sign.PrivateKey, error) {
-	if len(buf) != PrivateKeySize {
-		return nil, sign.ErrPrivKeySize
+	var sk PrivateKey
+	err := sk.UnmarshalBinary(buf)
+	if err != nil {
+		return nil, err
 	}
-
-	var (
-		buf2 [PrivateKeySize]byte
-		ret  PrivateKey
-	)
-
-	copy(buf2[:], buf)
-	ret.Unpack(&buf2)
-	return &ret, nil
+	
+	return &sk, nil
 }
 
 func (sk *PrivateKey) Scheme() sign.Scheme {
