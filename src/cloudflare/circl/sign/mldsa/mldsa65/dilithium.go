@@ -233,7 +233,7 @@ func (sk *PrivateKey) UnmarshalBinary(data []byte) error {
 		// Derive a key using the seed
 		var seedCopy [SeedSize]byte
 		copy(seedCopy[:], seed)
-		_, _ = NewKeyFromSeed(&seedCopy)
+		_, skFromSeed := NewKeyFromSeed(&seedCopy)
 
 		// Unpack the key
 		var keyCopy [PrivateKeySize]byte
@@ -241,7 +241,10 @@ func (sk *PrivateKey) UnmarshalBinary(data []byte) error {
 		sk.Unpack(&keyCopy)
 
 		// Check if the result in the same key
-		// TODO
+		if !sk.Equal(skFromSeed) {
+			return errors.New("error: incompatible seed and key values")
+		}
+
 		return nil
 	}
 }

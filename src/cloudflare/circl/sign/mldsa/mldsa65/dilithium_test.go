@@ -1,20 +1,21 @@
 package mldsa65
 
 import (
+	"bytes"
 	"crypto"
 	"crypto/rand"
 	"crypto/x509/pkix"
 	"encoding/asn1"
 	"encoding/pem"
+	"fmt"
 	"testing"
-	"bytes"
 )
 
-type pkcs8 struct {
-	Version    int
-	Algo       pkix.AlgorithmIdentifier
-	PrivateKey []byte
-}
+////////////////////////////////////////////////////////////////////////////////
+//                                                                            //
+// Tests                                                                      //
+//                                                                            //
+////////////////////////////////////////////////////////////////////////////////
 
 func TestUnmarshal(t *testing.T) {
 	t.Parallel()
@@ -22,70 +23,126 @@ func TestUnmarshal(t *testing.T) {
 	testcases := []struct {
 		name string
 		pem  string
+		check func (*PrivateKey, error)(error)
 	}{
 		{
 			name: "Expanded Format RFC 9981",
 			pem:  expanded_format_rfc,
+			check: checkOk,
 		},
 		{
 			name: "Expanded Format Cloudflare Circl",
 			pem:  expanded_format_cf,
+			check: checkOk,
 		},
 		{
 			name: "Seed Format RFC 9981",
 			pem:  seed_format_rfc,
+			check: checkOk,
 		},
 		{
 			name: "Both Format RFC 9981",
-			pem: both_format_rfc,
+			pem:  both_format_rfc,
+			check: checkOk,
+		},
+		{
+			name: "Both Format With Incompatible Keys RFC 9981",
+			pem:  both_format_wrong_keys_rfc,
+			check: checkBothFail,
 		},
 	}
 
 	for _, tc := range testcases {
 		t.Run(tc.name, func(t *testing.T) {
-			// Parse the PEM string
-			pemData, _ := pem.Decode([]byte(tc.pem))
-
-			// Obtain the pkcs8 private key structure
-			var privKey pkcs8
-			_, err := asn1.Unmarshal(pemData.Bytes, &privKey)
-			if err != nil {
-				t.Fatal(err)
-			}
-
-			// Obtain the packed private key
-			var packedSk asn1.RawValue
-			_, err = asn1.Unmarshal(privKey.PrivateKey, &packedSk)
-			if err != nil {
-				t.Fatal(err)
-			}
-
 			// Unmarshal the private key
-			var sk PrivateKey
-			err = sk.UnmarshalBinary(packedSk.Bytes)
+			sk, err := unmarshalKey(tc.pem)
+
+			// Run the check function
+			err = tc.check(sk, err)
 			if err != nil {
 				t.Fatal(err)
-			}
-
-			// Test signing and verifying a message
-			switch pk := sk.Public().(type) {
-			case *PublicKey:
-				// Test that sk is not nil
-				if bytes.Equal(pk.Bytes(), make([]byte, PublicKeySize)) {
-					t.Errorf("Error: could not unmarshal public key")
-				}
-
-				msg := []byte{0xde, 0xad, 0xbe, 0xef}
-				sig, err := sk.Sign(rand.Reader, msg, crypto.Hash(0))
-				if err != nil || !Verify(pk, msg, nil, sig) {
-					t.Fatal("Error: unmarshalled private key could not sign a message")
-				}
-			default:
-				t.Fatal("Error: could not derive the public key")
 			}
 		})
 	}
 }
+
+////////////////////////////////////////////////////////////////////////////////
+//                                                                            //
+// Helper functions and structures                                            //
+//                                                                            //
+////////////////////////////////////////////////////////////////////////////////
+
+type pkcs8 struct {
+	Version    int
+	Algo       pkix.AlgorithmIdentifier
+	PrivateKey []byte
+}
+
+func unmarshalKey(pemKey string) (*PrivateKey, error) {
+	// Parse the PEM string
+	pemData, _ := pem.Decode([]byte(pemKey))
+
+	// Obtain the pkcs8 private key structure
+	var privKey pkcs8
+	_, err := asn1.Unmarshal(pemData.Bytes, &privKey)
+	if err != nil {
+		return nil, err
+	}
+
+	// Obtain the packed private key
+	var packedSk asn1.RawValue
+	_, err = asn1.Unmarshal(privKey.PrivateKey, &packedSk)
+	if err != nil {
+		return nil, err
+	}
+
+	// Unmarshal the private key
+	var sk PrivateKey
+	err = sk.UnmarshalBinary(packedSk.Bytes)
+
+	return &sk, err
+}
+
+func checkOk(sk *PrivateKey, err error) error {
+	// Check that the key was unmarshalled without errors
+	if err != nil {
+		return err
+	}
+
+	// Test signing and verifying a message
+	switch pk := sk.Public().(type) {
+	case *PublicKey:
+		// Test that sk is not nil
+		if bytes.Equal(pk.Bytes(), make([]byte, PublicKeySize)) {
+			return fmt.Errorf("Error: could not unmarshal public key")
+		}
+
+		msg := []byte{0xde, 0xad, 0xbe, 0xef}
+		sig, err := sk.Sign(rand.Reader, msg, crypto.Hash(0))
+		if err != nil || !Verify(pk, msg, nil, sig) {
+			return fmt.Errorf("Error: unmarshalled private key could not sign a message")
+		}
+	default:
+		return fmt.Errorf("Error: could not derive the public key")
+	}
+
+	return nil
+}
+
+func checkBothFail(sk *PrivateKey, err error) (error) {
+	// Check that when the seed and expanded keys are not the same, an error is raised
+	if err == nil || err.Error() != "error: incompatible seed and key values" {
+		return fmt.Errorf("Unexpected Error: %s", err)
+	}
+
+	return nil
+}
+
+////////////////////////////////////////////////////////////////////////////////
+//                                                                            //
+// Sample data                                                                //
+//                                                                            //
+////////////////////////////////////////////////////////////////////////////////
 
 const seed_format_rfc = `
 -----BEGIN PRIVATE KEY-----
@@ -360,5 +417,96 @@ D02uYskkRQrmaquC8hRzBh2rPWKyR/kH41UZOa0/VGXp0IqCv+oX7qG2srkjdXR3
 +ZMACy9Dtw8oqqsf6aJq0f0zYWFsCw4kL+dmBLcDOh8w6X4o9SbKPIgP4rjZ0bDJ
 /xiLMcudl0JayrmyFtmKauNV5YPaceiGTuPRawdZeWGQ71RcHmK/75KvbKFHsTJE
 1siS/I7yI6s/Q/kkwvRmCX7o
+-----END PRIVATE KEY-----
+`
+
+const both_format_wrong_keys_rfc = `
+-----BEGIN PRIVATE KEY-----
+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
+iY1hJGzX2CQlCRYJG+QtkQ2i
 -----END PRIVATE KEY-----
 `
