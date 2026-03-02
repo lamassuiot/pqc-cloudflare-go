@@ -209,7 +209,7 @@ func (sk *PrivateKey) UnmarshalBinary(data []byte) error {
 		return nil
 	default:
 		if len(data) != (SeedSize + PrivateKeySize + 6) {
-			return errors.New("packed private key must be of mldsa44.PrivateKeySize, mldsa.KeySize or mldsa44.PrivateKeySize + mldsa.KeySize + 6 bytes")
+			return errors.New("packed private key must be of mldsa65.PrivateKeySize, mldsa65.KeySize or mldsa65.PrivateKeySize + mldsa65.KeySize + 6 bytes")
 		}
 
 		buf1 := make([]byte, SeedSize + 2)
