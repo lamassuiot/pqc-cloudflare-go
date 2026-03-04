@@ -97,11 +97,11 @@ func ParsePKCS8PrivateKey(der []byte) (key any, err error) {
 		if l := len(privKey.Algo.Parameters.FullBytes); l != 0 {
 			return nil, fmt.Errorf("x509: invalid %s private key parameters", scheme.Name())
 		}
-		var packedSk []byte
+		var packedSk asn1.RawValue
 		if _, err := asn1.Unmarshal(privKey.PrivateKey, &packedSk); err != nil {
 			return nil, fmt.Errorf("x509: invalid %s private key: %v", scheme.Name(), err)
 		}
-		sk, err := scheme.UnmarshalBinaryPrivateKey(packedSk)
+		sk, err := scheme.UnmarshalBinaryPrivateKey(packedSk.Bytes)
 		if err != nil {
 			return nil, fmt.Errorf("x509: invalid %s private key: %v", scheme.Name(), err)
 		}
