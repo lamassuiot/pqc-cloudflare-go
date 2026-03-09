@@ -205,10 +205,10 @@ func (sk *PrivateKey) UnmarshalBinary(data []byte) error {
 			return errors.New("packed private key must be of mldsa87.PrivateKeySize, mldsa87.KeySize or mldsa87.PrivateKeySize + mldsa87.KeySize + 6 bytes")
 		}
 
-		buf1 := make([]byte, SeedSize + 2)
-		buf2 := make([]byte, PrivateKeySize + 4)
+		buf1 := make([]byte, SeedSize+2)
+		buf2 := make([]byte, PrivateKeySize+4)
 		copy(buf1, data)
-		copy(buf2, data[SeedSize + 2:])
+		copy(buf2, data[SeedSize+2:])
 
 		// Check if the key is packed in Both format and umarshal it
 		var seed []byte
@@ -305,6 +305,7 @@ func (*scheme) PublicKeySize() int  { return PublicKeySize }
 func (*scheme) PrivateKeySize() int { return PrivateKeySize }
 func (*scheme) SignatureSize() int  { return SignatureSize }
 func (*scheme) SeedSize() int       { return SeedSize }
+func (*scheme) TLSIdentifier() uint { return 0x0906 }
 
 // TODO TLSIdentifier()
 func (*scheme) Oid() asn1.ObjectIdentifier {
@@ -388,7 +389,7 @@ func (*scheme) UnmarshalBinaryPrivateKey(buf []byte) (sign.PrivateKey, error) {
 	if err != nil {
 		return nil, err
 	}
-	
+
 	return &sk, nil
 }
 

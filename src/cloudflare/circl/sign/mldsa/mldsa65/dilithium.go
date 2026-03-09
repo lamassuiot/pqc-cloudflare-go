@@ -312,6 +312,7 @@ func (*scheme) PublicKeySize() int  { return PublicKeySize }
 func (*scheme) PrivateKeySize() int { return PrivateKeySize }
 func (*scheme) SignatureSize() int  { return SignatureSize }
 func (*scheme) SeedSize() int       { return SeedSize }
+func (*scheme) TLSIdentifier() uint   { return 0x0905 }
 
 // TODO TLSIdentifier()
 func (*scheme) Oid() asn1.ObjectIdentifier {

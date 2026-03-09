@@ -97,6 +97,13 @@ func TestUnmarshallFromBinary(t *testing.T) {
 	}
 }
 
+func TestTLSIdentifer(t *testing.T) {
+	sch := scheme{}
+	if sch.TLSIdentifier() != 0x0906 {
+		t.Fatal("mldsa65: Invalid TLS code point")
+	}
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 //                                                                            //
 // Helper functions and structures                                            //

@@ -18,33 +18,33 @@ import (
 ////////////////////////////////////////////////////////////////////////////////
 
 var testcases = []struct {
-	name string
-	pem  string
-	check func (crypto.Signer, error)(error)
+	name  string
+	pem   string
+	check func(crypto.Signer, error) error
 }{
 	{
-		name: "Expanded Format RFC 9881",
-		pem:  expanded_format_rfc,
+		name:  "Expanded Format RFC 9881",
+		pem:   expanded_format_rfc,
 		check: checkOk,
 	},
 	{
-		name: "Expanded Format Cloudflare Circl",
-		pem:  expanded_format_cf,
+		name:  "Expanded Format Cloudflare Circl",
+		pem:   expanded_format_cf,
 		check: checkOk,
 	},
 	{
-		name: "Seed Format RFC 9881",
-		pem:  seed_format_rfc,
+		name:  "Seed Format RFC 9881",
+		pem:   seed_format_rfc,
 		check: checkOk,
 	},
 	{
-		name: "Both Format RFC 9881",
-		pem:  both_format_rfc,
+		name:  "Both Format RFC 9881",
+		pem:   both_format_rfc,
 		check: checkOk,
 	},
 	{
-		name: "Both Format With Incompatible Keys RFC 9881",
-		pem:  both_format_wrong_keys_rfc,
+		name:  "Both Format With Incompatible Keys RFC 9881",
+		pem:   both_format_wrong_keys_rfc,
 		check: checkBothFail,
 	},
 }
@@ -97,6 +97,13 @@ func TestUnmarshallFromBinary(t *testing.T) {
 	}
 }
 
+func TestTLSIdentifer(t *testing.T) {
+	sch := scheme{}
+	if sch.TLSIdentifier() != 0x0904 {
+		t.Fatal("mldsa44: Invalid TLS code point")
+	}
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 //                                                                            //
 // Helper functions and structures                                            //
@@ -123,7 +130,7 @@ func unpackKey(pemKey string) ([]byte, error) {
 	// Obtain the packed private key
 	var packedSk asn1.RawValue
 	_, err = asn1.Unmarshal(privKey.PrivateKey, &packedSk)
-	
+
 	return packedSk.Bytes, err
 }
 
@@ -161,7 +168,7 @@ func checkOk(sk crypto.Signer, err error) error {
 	return nil
 }
 
-func checkBothFail(sk crypto.Signer, err error) (error) {
+func checkBothFail(sk crypto.Signer, err error) error {
 	// Check that when the seed and expanded keys are not the same, an error is raised
 	if err == nil || err.Error() != "error: incompatible seed and key values" {
 		return fmt.Errorf("Unexpected Error: %s", err)
